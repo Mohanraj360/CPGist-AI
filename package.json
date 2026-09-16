@@ -1,12 +1,14 @@
 {
-  "name": "my-project",
+  "name": "cpgist-ai",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.69",

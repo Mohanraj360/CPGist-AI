@@ -147,3 +147,48 @@ The Gemini model is configured with AI_MODEL and falls back to gemini-1.5-flash 
 No live Vercel Cron trigger has been observed firing (verified the route's own logic locally instead — see PHASE8_NOTES.md). Worth confirming once deployed.
 Alerts aren't referenced by the chat agent itself, only the separate bell-icon feed — see PHASE8_NOTES.md's decisions section if you want "by the way, there's an open alert on this brand" inside chat answers.
 The ACV data-quality issue above.
+
+## Current production hardening (CPGist AI)
+
+The application now treats Supabase as the source of truth for dashboard data. The dashboard no longer renders fabricated business metrics or placeholder brand cards. CSV ingestion automatically detects common CPG columns and populates brand, retailer, and product dimensions before writing `sales_facts`.
+
+### Analytics and AI
+
+- Analytics retrieves the complete `sales_facts` result set in pages instead of silently using the first 1,000 rows.
+- Brand comparison supports selecting up to four observed brands.
+- Brand detail exposes sales, units, market share, period trend, category mix, and observed anomalies.
+- The AI Analyst automatically uses the latest ready dataset when no dataset is explicitly selected.
+- Ollama receives server-computed evidence only.
+- Each AI response gets a **deterministic grounding confidence** based on evidence-term overlap and exact numeric-claim matches. This is deliberately not presented as model accuracy: true accuracy requires a labeled evaluation benchmark.
+- Saved analyses are persisted in `analyses`.
+
+### Working operations
+
+- CSV import and ingestion
+- Dataset selection and real analytics
+- Brand comparison and brand detail
+- AI chat with Ollama
+- Saved analyses
+- Report creation and CSV export
+- Workflow creation and execution against a selected dataset
+- Google Drive and Microsoft Graph OAuth start/callback routes
+- Connector status endpoint
+- Agent-Reach HTTP adapter at `POST /api/research`
+
+### Agent-Reach
+
+Agent-Reach is kept as an external research layer rather than mixed into syndicated sales facts. Configure the endpoint exposed by your Agent-Reach deployment:
+
+```env
+AGENT_REACH_BASE_URL=
+AGENT_REACH_API_KEY=
+AGENT_REACH_SCRAPE_PATH=/scrape
+```
+
+The exact path can be changed with `AGENT_REACH_SCRAPE_PATH` so the adapter does not assume a particular Agent-Reach deployment contract.
+
+### Connector security
+
+OAuth access and refresh tokens are encrypted with AES-256-GCM before being stored in `data_connections`. Set `CONNECTOR_ENCRYPTION_KEY` to a base64-encoded 32-byte secret (or a 64-character hex key).
+
+Run the migrations in `supabase/migrations/` in order before using the protected connector/signal tables.

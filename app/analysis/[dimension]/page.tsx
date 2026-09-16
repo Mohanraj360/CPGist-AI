@@ -1,14 +1,23 @@
 import Link from 'next/link'
-import { ArrowLeft, BarChart3, Database } from 'lucide-react'
+import { ArrowLeft, BarChart3, Database, GitCompare, Target } from 'lucide-react'
+import { createClient } from '@/lib/supabase/server'
+import { aggregateAnalytics, brandDetail } from '@/lib/cpg/server-analytics'
 
-const dimensions = new Set(['brand', 'category', 'product', 'retailer'])
+const dimensions=new Set(['brand','category','product','retailer'])
+export const dynamic='force-dynamic'
 
-export default async function AnalysisPage({ params }: { params: Promise<{ dimension: string }> }) {
-  const { dimension } = await params
-  const label = dimensions.has(dimension) ? `${dimension[0].toUpperCase()}${dimension.slice(1)}` : 'CPG'
-  return <main className="cpg-shell"><section className="cpg-main"><div className="content-wrap page-enter">
-    <Link className="text-button" href="/"><ArrowLeft /> Back to workspace</Link>
-    <div className="page-heading"><div><div className="eyebrow">ANALYSIS / {label.toUpperCase()}</div><h1>{label} performance</h1><p>Filter real ingested CPG data by period, category, retailer, region, and channel.</p></div><div className="heading-actions"><button className="button secondary" disabled>Choose {label}</button><button className="button secondary" disabled>Last 30 days</button></div></div>
-    <div className="dashboard-grid"><section className="panel analyst-empty"><BarChart3 /><h2>No {dimension} data available</h2><p>Connect and ingest a dataset before calculating sales, units, growth, share, distribution, pricing, or promotion metrics.</p><Link className="button secondary" href="/datasets">Open dataset explorer</Link></section><section className="panel dataset-side"><div className="panel-kicker">ANALYTICAL MODEL</div><h2>Metrics become available after ingestion</h2><p className="muted-copy">This view is ready for server-side aggregations and will never display fabricated business claims.</p><div className="pipeline"><div><i>1</i><span>Load dimensions</span></div><div><i>2</i><span>Aggregate measures</span></div><div><i>3</i><span>Compare periods</span></div><div><i>4</i><span>Generate story</span></div></div><Database className="analysis-db" /></section></div>
-  </div></section></main>
+export default async function AnalysisPage({params,searchParams}:{params:Promise<{dimension:string}>;searchParams:Promise<{datasetId?:string;brandId?:string}>}){
+  const {dimension}=await params;const qs=await searchParams
+  if(!dimensions.has(dimension))return <main className="cpg-shell"><section className="cpg-main"><div className="content-wrap"><Link className="text-button" href="/"><ArrowLeft/> Back</Link><div className="panel analyst-empty"><h2>Unknown analysis dimension</h2></div></div></section></main>
+  const supabase=await createClient();const {data:{user}}=await supabase.auth.getUser()
+  if(!user)return <main className="cpg-shell"><section className="cpg-main"><div className="content-wrap"><Link className="button primary" href="/login">Sign in</Link></div></section></main>
+  const {data:datasets}=await supabase.from('datasets').select('id,name,status,row_count').eq('status','ready').order('updated_at',{ascending:false})
+  const datasetId=qs.datasetId??datasets?.[0]?.id
+  const analytics=datasetId?await aggregateAnalytics(supabase,datasetId):null
+  const detail=dimension==='brand'&&qs.brandId&&datasetId?await brandDetail(supabase,datasetId,qs.brandId):null
+  const list=dimension==='brand'?analytics?.brands:dimension==='category'?analytics?.categories:dimension==='retailer'?analytics?.retailers:[]
+  return <main className="cpg-shell"><section className="cpg-main"><div className="content-wrap page-enter"><Link className="text-button" href="/"><ArrowLeft/> Back to workspace</Link><div className="page-heading"><div><div className="eyebrow">ANALYSIS / {dimension.toUpperCase()}</div><h1>{dimension[0].toUpperCase()+dimension.slice(1)} performance</h1><p>Calculated from the selected dataset, not placeholder values.</p></div><Link className="button secondary" href="/?view=Insights"><GitCompare/> Brand comparison</Link></div>{datasets?.length?<><div className="brand-picker">{datasets.map(d=><Link key={d.id} className={`button ${d.id===datasetId?'primary':'secondary'}`} href={`/analysis/${dimension}?datasetId=${d.id}`}>{d.name}</Link>)}</div>{detail?<section className="panel"><div className="panel-kicker">BRAND DETAIL</div><h2>{detail.name}</h2><div className="metric-row"><Metric icon={BarChart3} label="Sales" value={money(detail.metrics.sales)} delta="Observed"/><Metric icon={Target} label="Market share" value={pct(detail.metrics.marketShare)} delta="Share of dataset sales"/><Metric icon={BarChart3} label="Units" value={money(detail.metrics.units)} delta="Observed"/></div><div className="panel"><div className="panel-kicker">TREND</div>{detail.trend.map(x=><div className="dataset-row" key={x.period}><strong>{x.period}</strong><span>{money(x.sales)} sales</span><span>{money(x.units)} units</span></div>)}</div></section>:<section className="panel data-table"><div className="table-head"><span>{dimension}</span><span>Sales</span><span>Units</span><span>Share</span><span/></div>{(list??[]).map((x:any)=><div className="dataset-row" key={x.id??x.name}><strong>{x.name}</strong><span>{money(x.sales)}</span><span>{money(x.units)}</span><span>{pct(x.marketShare)}</span>{dimension==='brand'?<Link className="button secondary" href={`/analysis/brand?datasetId=${datasetId}&brandId=${x.id}`}>Details</Link>:<span/>}</div>)}</section>}</>:<div className="panel analyst-empty"><Database/><h2>No ready datasets</h2><p>Import a CSV dataset before running analysis.</p></div>}</div></section></main>
 }
+function money(n:number|null|undefined){return n==null?'—':new Intl.NumberFormat(undefined,{maximumFractionDigits:0}).format(n)}
+function pct(n:number|null|undefined){return n==null?'—':`${n.toFixed(1)}%`}
+function Metric({icon:Icon,label,value,delta}:{icon:any;label:string;value:string;delta:string}){return <div className="metric-card"><div className="metric-icon"><Icon/></div><span>{label}</span><strong>{value}</strong><small>{delta}</small></div>}

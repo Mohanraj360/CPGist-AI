@@ -1,105 +1,221 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import type { User } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/client'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Activity, AlertTriangle, BarChart3, Bell, BrainCircuit, CheckCircle2, ChevronDown, CircleHelp,
-  Database, FileBarChart, FileText, GitBranch, Grid2X2, HardDrive, LayoutDashboard, Menu,
-  Network, Plus, Search, Settings2, ShieldCheck, Sparkles, Workflow, X, ArrowUpRight,
-  RefreshCw, Clock3, SlidersHorizontal, MoreHorizontal, Play, Save, Download, LockKeyhole,
+  Activity, ArrowUpRight, BarChart3, Bell, BrainCircuit, CheckCircle2, ChevronDown, CircleHelp,
+  Database, Download, FileBarChart, FileText, GitBranch, HardDrive, LayoutDashboard, Menu,
+  Network, Plus, Search, Settings2, ShieldCheck, Sparkles, Workflow, Save, Play, RefreshCw,
+  Upload, X, Trash2, GitCompare, Target, AlertTriangle,
 } from 'lucide-react'
 
-const nav = [
-  { label: 'Overview', icon: LayoutDashboard },
-  { label: 'AI Analyst', icon: BrainCircuit },
-  { label: 'Data Sources', icon: Network },
-  { label: 'Datasets', icon: Database },
-  { label: 'Validation', icon: ShieldCheck, count: '12' },
-  { label: 'Insights', icon: Sparkles },
-  { label: 'Reports', icon: FileBarChart },
-  { label: 'Workflows', icon: Workflow },
-  { label: 'Saved Analyses', icon: Save },
+type Dataset = { id: string; name: string; source: string; status: string; row_count: number; updated_at: string }
+type Brand = { id: string; name: string }
+type Analytics = {
+  dataset: Dataset
+  metrics: { rowCount: number; sales: number; units: number; averagePrice: number | null; promotionRate: number | null; averageDistribution: number | null }
+  trend: { period: string; sales: number; units: number }[]
+  categories: { id: string; name: string; sales: number; units: number; rows: number; marketShare: number | null }[]
+  brands: { id: string; name: string; sales: number; units: number; rows: number; marketShare: number | null; latestGrowth?: number | null }[]
+  retailers: { id: string; name: string; sales: number; units: number; rows: number; marketShare: number | null }[]
+  anomalies: { period: string | null; sales: number; zScore: number }[]
+  selectedBrand?: any
+  comparison?: any[]
+}
+type Nav = 'Overview' | 'AI Analyst' | 'Data Sources' | 'Datasets' | 'Validation' | 'Insights' | 'Reports' | 'Workflows' | 'Saved Analyses' | 'Settings'
+
+const nav: { label: Nav; icon: any }[] = [
+  { label: 'Overview', icon: LayoutDashboard }, { label: 'AI Analyst', icon: BrainCircuit },
+  { label: 'Data Sources', icon: Network }, { label: 'Datasets', icon: Database },
+  { label: 'Validation', icon: ShieldCheck }, { label: 'Insights', icon: Sparkles },
+  { label: 'Reports', icon: FileBarChart }, { label: 'Workflows', icon: Workflow },
+  { label: 'Saved Analyses', icon: Save }, { label: 'Settings', icon: Settings2 },
 ]
 
+const money = (n: number | null | undefined) => n == null ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n)
+const pct = (n: number | null | undefined) => n == null ? '—' : `${n.toFixed(1)}%`
+
 export default function Home() {
-  const [active, setActive] = useState('Overview')
+  const [active, setActive] = useState<Nav>('Overview')
+  const [datasets, setDatasets] = useState<Dataset[]>([])
+  const [datasetId, setDatasetId] = useState('')
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [query, setQuery] = useState('')
+  const [commandOpen, setCommandOpen] = useState(false)
   const [analystPrompt, setAnalystPrompt] = useState('')
-  const [showCommand, setShowCommand] = useState(false)
-  const [toast, setToast] = useState('')
-  const [transition, setTransition] = useState(false)
-  const [user, setUser] = useState<User | null>(null)
-  const supabase = useMemo(() => {
-    try {
-      return createClient()
-    } catch {
-      return null
+  const [answer, setAnswer] = useState<any>(null)
+  const [brandIds, setBrandIds] = useState<string[]>([])
+  const [brands, setBrands] = useState<Brand[]>([])
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [user, setUser] = useState<{ email?: string; user_metadata?: { full_name?: string } } | null>(null)
+
+  const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 3000) }
+
+  async function loadDatasets() {
+    const response = await fetch('/api/datasets', { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Unable to load datasets')
+    setDatasets(data.datasets ?? [])
+    if (!datasetId && data.datasets?.length) {
+      const ready = data.datasets.find((d: Dataset) => d.status === 'ready') ?? data.datasets[0]
+      setDatasetId(ready.id)
     }
-  }, [])
-  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Workspace member'
-  const initials = displayName.split(/\s+/).map((part: string) => part[0]).join('').slice(0, 2).toUpperCase()
-
-  useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getUser().then(({ data }) => setUser(data.user))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null))
-    return () => subscription.unsubscribe()
-  }, [supabase])
-
-  const signOut = async () => {
-    if (supabase) await supabase.auth.signOut()
-    window.location.assign('/login')
   }
 
-  const filteredNav = useMemo(() => nav.filter((item) => item.label.toLowerCase().includes(query.toLowerCase())), [query])
-  const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
-  const navigate = (page: string) => { setTransition(true); window.setTimeout(() => { setActive(page); setTransition(false) }, 120) }
+  async function loadAnalytics(id: string) {
+    setRefreshing(true)
+    try {
+      const response = await fetch(`/api/analytics?datasetId=${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Analytics unavailable')
+      setAnalytics(data)
+      const b = await fetch(`/api/brands?datasetId=${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const bd = await b.json()
+      if (b.ok) setBrands(bd.brands ?? [])
+    } catch (e) { notify(e instanceof Error ? e.message : 'Unable to load analytics') }
+    finally { setRefreshing(false); setLoading(false) }
+  }
+
+  useEffect(() => {
+    fetch('/api/datasets', { cache: 'no-store' }).then(async r => {
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Unable to load datasets')
+      setDatasets(d.datasets ?? [])
+      const ready = (d.datasets ?? []).find((x: Dataset) => x.status === 'ready') ?? d.datasets?.[0]
+      if (ready) setDatasetId(ready.id)
+    }).catch(e => { notify(e instanceof Error ? e.message : 'Unable to load datasets'); setLoading(false) })
+    fetch('/api/auth/user').then(r => r.ok ? r.json() : null).then(d => setUser(d?.user ?? null)).catch(() => {})
+  }, [])
+
+  useEffect(() => { if (datasetId) loadAnalytics(datasetId) }, [datasetId])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setCommandOpen(true) } if (e.key === 'Escape') setCommandOpen(false) }
+    window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const selected = useMemo(() => analytics?.brands.filter(b => brandIds.includes(b.id)) ?? [], [analytics, brandIds])
+
+  const ask = async () => {
+    if (!analystPrompt.trim()) return
+    setAnswer(null)
+    try {
+      const r = await fetch('/api/analyst', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: analystPrompt, datasetId }) })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Analyst failed')
+      setAnswer(d); setAnalystPrompt('')
+    } catch (e) { notify(e instanceof Error ? e.message : 'Analyst failed') }
+  }
+
+  const upload = async (file: File, name: string) => {
+    setUploading(true)
+    try {
+      const form = new FormData(); form.append('file', file); if (name) form.append('name', name)
+      const r = await fetch('/api/ingest', { method: 'POST', body: form }); const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Upload failed')
+      notify(`Imported ${d.rowCount.toLocaleString()} rows`)
+      setUploadOpen(false); await loadDatasets(); setDatasetId(d.datasetId)
+    } catch (e) { notify(e instanceof Error ? e.message : 'Upload failed') }
+    finally { setUploading(false) }
+  }
+
+  const refresh = async () => { await loadDatasets(); if (datasetId) await loadAnalytics(datasetId); notify('Workspace refreshed') }
+
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Workspace member'
+  const initials = displayName.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase()
 
   return <main className="cpg-shell">
     <aside className={`cpg-sidebar ${sidebarOpen ? '' : 'is-collapsed'}`}>
       <div className="brand-lockup"><div className="brand-mark"><Sparkles /></div>{sidebarOpen && <div><strong>CPGist</strong><span>AI intelligence</span></div>}</div>
-      <div className="workspace-switcher"><div className="workspace-avatar">N</div>{sidebarOpen && <><div className="workspace-copy"><span>Workspace</span><strong>Northstar CPG</strong></div><ChevronDown className="small-icon" /></>}</div>
+      <button className="workspace-switcher" onClick={() => setActive('Settings')}><div className="workspace-avatar">C</div>{sidebarOpen && <><div className="workspace-copy"><span>Workspace</span><strong>CPGist AI</strong></div><ChevronDown className="small-icon" /></>}</button>
       <div className="nav-section-label">{sidebarOpen ? 'Workspace' : '•••'}</div>
-      <nav className="primary-nav" aria-label="Primary navigation">{nav.map((item) => { const Icon = item.icon; return <button key={item.label} className={`nav-item ${active === item.label ? 'active' : ''}`} onClick={() => navigate(item.label)} title={item.label}><Icon />{sidebarOpen && <span>{item.label}</span>}{sidebarOpen && item.count && <b>{item.count}</b>}</button> })}</nav>
-      <div className="sidebar-bottom"><button className="nav-item" onClick={() => notify('Help center opened')}><CircleHelp />{sidebarOpen && <span>Help center</span>}</button><button className="nav-item" onClick={() => navigate('Settings')}><Settings2 />{sidebarOpen && <span>Settings</span>}</button><button className="user-card" onClick={signOut} title="Sign out"><div className="user-avatar">{initials}</div>{sidebarOpen && <div><strong>{displayName}</strong><span>Sign out</span></div>}</button></div>
+      <nav className="primary-nav">{nav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => setActive(label)}><Icon />{sidebarOpen && <span>{label}</span>}</button>)}</nav>
+      <div className="sidebar-bottom"><button className="nav-item" onClick={() => notify('Use the search box or ask AI Analyst for help.')}><CircleHelp />{sidebarOpen && <span>Help center</span>}</button><button className="nav-item" onClick={() => setActive('Settings')}><Settings2 />{sidebarOpen && <span>Settings</span>}</button><button className="user-card" onClick={async () => { await fetch('/api/auth/signout', { method: 'POST' }).catch(() => {}); window.location.assign('/login') }}><div className="user-avatar">{initials}</div>{sidebarOpen && <div><strong>{displayName}</strong><span>Sign out</span></div>}</button></div>
     </aside>
+
     <section className="cpg-main">
-      <header className="topbar"><button className="icon-button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle navigation"><Menu /></button><button className="global-search" onClick={() => setShowCommand(true)}><Search /><span>Search across your workspace</span><kbd>⌘ K</kbd></button><div className="top-actions"><span className="live-dot"><i /> Live sync</span><button className="icon-button" onClick={() => notify('No new notifications')}><Bell /></button><button className="top-avatar" onClick={signOut} aria-label="Sign out">{initials}</button></div></header>
-      <div className={`content-wrap ${transition ? 'page-exit' : 'page-enter'}`}>
-        <div className="page-heading"><div><div className="eyebrow">NORTHSTAR CPG / WORKSPACE</div><h1>{active}</h1><p>{descriptions[active] ?? `Explore and manage ${active.toLowerCase()} across your workspace.`}</p></div><div className="heading-actions"><button className="button secondary" onClick={() => notify('Date range selector opened')}>Last 30 days <ChevronDown /></button><button className="button primary" onClick={() => notify('New workflow started')}><Plus /> New workflow</button></div></div>
-        {active === 'Overview' && <Overview onNavigate={navigate} onNotify={notify} />}
-        {active === 'AI Analyst' && <Analyst prompt={analystPrompt} setPrompt={setAnalystPrompt} onNotify={notify} />}
-        {active === 'Data Sources' && <Sources onNotify={notify} />}
-        {active === 'Datasets' && <Datasets onNavigate={navigate} onNotify={notify} />}
-        {active === 'Validation' && <Quality onNotify={notify} />}
-        {active === 'Insights' && <Insights onNavigate={navigate} onNotify={notify} />}
-        {active === 'Reports' && <Reports onNotify={notify} />}
-        {active === 'Workflows' && <Workflows onNotify={notify} />}
-        {active === 'Saved Analyses' && <Saved onNavigate={navigate} />}
+      <header className="topbar"><button className="icon-button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle navigation"><Menu /></button><button className="global-search" onClick={() => setCommandOpen(true)}><Search /><span>Search datasets, brands, reports...</span><kbd>⌘ K</kbd></button><div className="top-actions"><button className="icon-button" onClick={refresh} title="Refresh"><RefreshCw className={refreshing ? 'spin' : ''} /></button><span className="live-dot"><i /> Live data</span><button className="icon-button" onClick={() => setActive('Validation')}><Bell /></button><button className="top-avatar" onClick={() => setActive('Settings')}>{initials}</button></div></header>
+
+      <div className="content-wrap page-enter">
+        <div className="page-heading"><div><div className="eyebrow">CPGIST AI / WORKSPACE</div><h1>{active}</h1><p>{active === 'Overview' ? 'Evidence-first consumer packaged goods intelligence.' : `Work with real data in ${active.toLowerCase()}.`}</p></div><div className="heading-actions">
+          <select className="button secondary" value={datasetId} onChange={e => setDatasetId(e.target.value)} aria-label="Active dataset"><option value="">Select dataset</option>{datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+          <button className="button primary" onClick={() => active === 'Datasets' ? setUploadOpen(true) : setActive('Workflows')}><Plus /> {active === 'Datasets' ? 'Import dataset' : 'New workflow'}</button>
+        </div></div>
+
+        {active === 'Overview' && <Overview analytics={analytics} datasets={datasets} onAI={() => setActive('AI Analyst')} onCompare={() => setActive('Insights')} />}
+        {active === 'AI Analyst' && <Analyst prompt={analystPrompt} setPrompt={setAnalystPrompt} answer={answer} ask={ask} />}
+        {active === 'Data Sources' && <Sources notify={notify} />}
+        {active === 'Datasets' && <DatasetView datasets={datasets} analytics={analytics} onUpload={() => setUploadOpen(true)} onRefresh={refresh} onSelect={setDatasetId} />}
+        {active === 'Validation' && <Validation analytics={analytics} />}
+        {active === 'Insights' && <Comparison analytics={analytics} brands={brands} selected={selected} brandIds={brandIds} setBrandIds={setBrandIds} datasetId={datasetId} />}
+        {active === 'Reports' && <Reports datasets={datasets} datasetId={datasetId} notify={notify} />}
+        {active === 'Workflows' && <Workflows datasets={datasets} datasetId={datasetId} notify={notify} />}
+        {active === 'Saved Analyses' && <Saved />}
         {active === 'Settings' && <Settings />}
       </div>
-      {toast && <div className="toast"><CheckCircle2 /> {toast}</div>}
     </section>
-    {showCommand && <div className="command-backdrop" onClick={() => setShowCommand(false)}><div className="command-box" onClick={(e) => e.stopPropagation()}><div className="command-input"><Search /><input autoFocus placeholder="Search navigation and datasets..." value={query} onChange={(e) => setQuery(e.target.value)} /><kbd>ESC</kbd></div><div className="command-results">{filteredNav.map((item) => <button key={item.label} onClick={() => { navigate(item.label); setShowCommand(false) }}><item.icon />{item.label}<span>Jump to page</span></button>)}</div></div></div>}
+
+    {uploadOpen && <UploadModal uploading={uploading} onClose={() => setUploadOpen(false)} onUpload={upload} />}
+    {commandOpen && <div className="command-backdrop" onClick={() => setCommandOpen(false)}><div className="command-box" onClick={e => e.stopPropagation()}><div className="command-input"><Search /><input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search navigation..." /><kbd>ESC</kbd></div><div className="command-results">{nav.filter(x => x.label.toLowerCase().includes(query.toLowerCase())).map(({label,icon:Icon}) => <button key={label} onClick={() => {setActive(label);setCommandOpen(false)}}><Icon />{label}<span>Open</span></button>)}</div></div></div>}
+    {toast && <div className="toast"><CheckCircle2 /> {toast}</div>}
   </main>
 }
 
-const descriptions: Record<string, string> = { Overview: 'Your connected intelligence layer for consumer packaged goods.', 'AI Analyst': 'Ask grounded questions across your syndicated intelligence.', 'Data Sources': 'Connect, monitor, and sync the systems behind your analysis.', Datasets: 'Browse the canonical data powering your workspace.', Validation: 'Monitor quality signals before they reach a report.', Insights: 'Signals and opportunities surfaced from your data.', Reports: 'Generated intelligence for every team and decision.', Workflows: 'Automate the path from source file to decision.', 'Saved Analyses': 'Return to questions and answers worth keeping.', Settings: 'Workspace preferences, access, and connected services.' }
+function Overview({ analytics, datasets, onAI, onCompare }: { analytics: Analytics | null; datasets: Dataset[]; onAI: () => void; onCompare: () => void }) {
+  const trend = analytics?.trend ?? []
+  return <div className="dashboard-grid">
+    <div className="metric-row"><Metric icon={Database} label="Connected datasets" value={String(datasets.length)} delta={datasets.length ? `${datasets.filter(d => d.status === 'ready').length} ready` : 'Import a CSV'} /><Metric icon={BarChart3} label="Total sales" value={analytics ? money(analytics.metrics.sales) : '—'} delta={analytics ? `${analytics.metrics.rowCount.toLocaleString()} rows` : 'Select a dataset'} /><Metric icon={Target} label="Market coverage" value={analytics ? pct(analytics.metrics.averageDistribution) : '—'} delta={analytics ? 'Average distribution' : 'Calculated from data'} /></div>
+    <section className="panel analyst-card"><PanelHeading kicker="AI ANALYST" title="Ask your intelligence layer" action={<button className="text-button" onClick={onAI}>Open analyst <ArrowUpRight /></button>} /><p>Ask questions about the selected dataset. The model receives only server-computed evidence from your data.</p><div className="suggestion-row"><button onClick={onAI}>Which brands have the highest share?</button><button onClick={onAI}>Find sales anomalies</button><button onClick={onCompare}>Compare brands</button></div></section>
+    <section className="panel chart-panel"><PanelHeading kicker="SALES TREND" title="Real dataset trend" action={<span className="muted-copy">{trend.length} periods</span>} />{trend.length ? <LineChart points={trend.map(x => x.sales)} labels={trend.map(x => x.period)} /> : <Empty icon={Database} text="Select an ingested dataset to plot sales." />}</section>
+    <section className="panel"><PanelHeading kicker="BRAND PERFORMANCE" title="Share by brand" action={<button className="text-button" onClick={onCompare}>Compare <GitCompare /></button>} />{analytics?.brands.length ? <Bars items={analytics.brands.slice(0, 8).map(x => ({ label: x.name, value: x.marketShare ?? 0 }))} /> : <Empty icon={BarChart3} text="Brand dimensions appear after brand data is ingested." />}</section>
+    <section className="panel"><PanelHeading kicker="ANOMALIES" title="Observed outliers" />{analytics?.anomalies.length ? analytics.anomalies.slice(0,6).map((a,i)=><div className="activity-row" key={i}><div><strong>{a.period}</strong><span>Sales {money(a.sales)} · z-score {a.zScore.toFixed(2)}</span></div><em>Observed</em></div>) : <Empty icon={ShieldCheck} text="No statistical outliers detected in the selected dataset." />}</section>
+  </div>
+}
 
-function Overview({ onNavigate, onNotify }: { onNavigate: (s: string) => void; onNotify: (s: string) => void }) { return <div className="dashboard-grid"><div className="metric-row"><Metric icon={Database} label="Connected datasets" value="—" delta="Connect a source to begin" /><Metric icon={Activity} label="Data quality score" value="—" delta="Available after ingestion" /><Metric icon={Workflow} label="Active workflows" value="—" delta="No workflows configured" /></div><section className="panel analyst-card"><div className="panel-heading"><div><div className="panel-kicker"><span className="pulse" /> AI ANALYST</div><h2>Ask your intelligence layer</h2><p>Query your syndicated data in plain language.</p></div><button className="text-button" onClick={() => onNavigate('AI Analyst')}>Open analyst <ArrowUpRight /></button></div><div className="suggestion-row"><button onClick={() => onNavigate('AI Analyst')}>Which brands gained share last quarter?</button><button onClick={() => onNavigate('AI Analyst')}>Show me anomalies in retail sales</button><button onClick={() => onNavigate('AI Analyst')}>Summarize my latest reports</button></div></section><section className="panel chart-panel"><PanelHeading kicker="DATA COVERAGE" title="Intelligence coverage" action={<button className="icon-button"><BarChart3 /></button>} /><CoverageChart /></section><section className="panel activity-panel"><PanelHeading kicker="RECENT ACTIVITY" title="Workspace pulse" action={<button className="text-button" onClick={() => onNotify('Activity log opened')}>View all</button>} /><div className="analyst-empty activity-empty"><Activity /><h2>No activity yet</h2><p>Source connections, ingestion jobs, and reports will appear here after real operations run.</p></div></section><section className="panel quality-panel"><PanelHeading kicker="DATA QUALITY" title="Needs your attention" action={<button className="text-button" onClick={() => onNavigate('Validation')}>Review issues</button>} /><div className="quality-score"><div className="score-ring"><strong>94.8</strong><span>/ 100</span></div><div><strong>Healthy workspace</strong><p>12 open issues across 4 datasets</p><div className="progress"><span style={{ width: '82%' }} /></div></div></div></section></div> }
-function PanelHeading({ kicker, title, action }: { kicker: string; title: string; action?: React.ReactNode }) { return <div className="panel-heading"><div><div className="panel-kicker">{kicker}</div><h2>{title}</h2></div>{action}</div> }
-function Metric({ icon: Icon, label, value, delta, positive }: { icon: React.ElementType; label: string; value: string; delta: string; positive?: boolean }) { return <div className="metric-card"><div className="metric-icon"><Icon /></div><span>{label}</span><strong>{value}</strong><small className={positive ? 'positive' : ''}>{positive ? '↑ ' : ''}{delta}</small></div> }
-function ActivityRow({ icon: Icon, title, detail, status, warning }: { icon: React.ElementType; title: string; detail: string; status: string; warning?: boolean }) { return <div className="activity-row"><div className={`activity-icon ${warning ? 'warning' : ''}`}><Icon /></div><div><strong>{title}</strong><span>{detail}</span></div><em className={warning ? 'status-warning' : ''}>{status}</em></div> }
-function CoverageChart() { return <div className="analyst-empty"><Database /><h2>No coverage data yet</h2><p>Coverage trends will appear after a source is connected and its first dataset is ingested.</p></div> }
-function Analyst({ prompt, setPrompt, onNotify }: { prompt: string; setPrompt: (s: string) => void; onNotify: (s: string) => void }) { const [answer, setAnswer] = useState(''); const [loading, setLoading] = useState(false); const [lines, setLines] = useState<string[]>([]); const ask = async () => { if (!prompt.trim() || loading) return; setLoading(true); setLines(['> submitting analyst request']); try { const response = await fetch('/api/analyst', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); setLines((data.trace ?? []).map((line: string) => `> ${line.toLowerCase()}`)); setAnswer(data.answer); setPrompt('') } catch (error) { onNotify(error instanceof Error ? error.message : 'The analyst is temporarily unavailable.') } finally { setLoading(false) } }; return <section className="analyst-workspace"><div className="terminal-header"><span className="terminal-dot" /><span>CPGist Analyst / grounded mode</span><span className="terminal-status">● {loading ? 'THINKING' : 'READY'}</span></div><div className="analyst-body">{loading && <div className="tool-terminal">{lines.map((line) => <div key={line}>{line}<span> done</span></div>)}<div className="cursor-line">_</div></div>}{answer && !loading ? <div className="answer"><div className="answer-label">ANALYSIS COMPLETE <span>· Ollama response</span></div><p>{answer}</p><div className="citation"><Database /> Source context <span>Connected workspace datasets</span></div><div className="answer-actions"><button className="button secondary" onClick={() => onNotify('Report export queued')}><Download /> Export report</button><button className="button secondary" onClick={() => onNotify('Analysis shared')}>Share insight</button></div></div> : !loading && <div className="analyst-empty"><Sparkles /><h2>What would you like to know?</h2><p>Ask a question about your connected CPG data. The analyst will show its sources and reasoning.</p></div>}<div className="prompt-box"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); ask() } }} placeholder="Ask about your data..." /><button className="send-button" onClick={ask} disabled={loading}><Play /></button></div><div className="prompt-hints"><button onClick={() => setPrompt('Which brands gained share last quarter?')}>Share by brand</button><button onClick={() => setPrompt('Find anomalies in retail sales')}>Find anomalies</button><button onClick={() => setPrompt('Summarize the latest reports')}>Summarize reports</button></div></div></section> }
-function Sources({ onNotify }: { onNotify: (s: string) => void }) { return <div className="sources-grid"><SourceCard icon={GitBranch} name="GitHub Syndicate" type="Repository" status="Not configured" detail="Repository connection required" onNotify={onNotify} actionLabel="Configure connection" /><SourceCard icon={HardDrive} name="Google Drive" type="Cloud storage" status="Not configured" detail="OAuth credentials are checked server-side before connection" onNotify={onNotify} actionLabel="Connect Google Drive" href="/api/connectors/google" /><SourceCard icon={Network} name="Microsoft Graph" type="Enterprise data" status="Not configured" detail="OAuth credentials are checked server-side before connection" onNotify={onNotify} actionLabel="Connect Microsoft Graph" href="/api/connectors/microsoft" /></div> }
-function SourceCard({ icon: Icon, name, type, status, detail, action, href, onNotify, actionLabel }: any) { return <section className="panel source-card"><div className="source-icon"><Icon /></div><div className="source-title"><h2>{name}</h2><span>{type}</span></div><div className={`source-status ${status === 'Connected' ? 'connected' : 'not-configured'}`}><i /> {status}</div><p>{detail}</p>{href ? <a className="button secondary full" href={href}>{status === 'Connected' ? <><RefreshCw /> {actionLabel}</> : actionLabel}</a> : <button className="button secondary full" onClick={action ?? (() => onNotify?.('This connector is not configured.'))}>{status === 'Connected' ? <><RefreshCw /> {actionLabel}</> : <>Configure connection</>}</button>}</section> }
-function Datasets({ onNavigate, onNotify }: any) { const data = [{ name: 'Brand Master', rows: '18,420', updated: '12 min ago', quality: '98.4%' }, { name: 'Retail Sales Q3', rows: '2.4M', updated: '1 hr ago', quality: '91.2%' }, { name: 'Media Performance', rows: '842K', updated: '4 days ago', quality: '89.6%' }, { name: 'Category Taxonomy', rows: '3,208', updated: 'Yesterday', quality: '99.1%' }]; return <div className="dataset-layout"><section className="panel data-table"><div className="table-toolbar"><div><div className="panel-kicker">CANONICAL DATASETS</div><h2>All datasets <span>24</span></h2></div><div className="toolbar-actions"><button className="button secondary" onClick={() => onNotify('Filters opened')}><SlidersHorizontal /> Filter</button><button className="button primary" onClick={() => onNotify('Dataset import started')}><Plus /> Import dataset</button></div></div><div className="table-head"><span>Dataset</span><span>Rows</span><span>Last updated</span><span>Quality</span><span /></div>{data.map((item) => <button className="dataset-row" key={item.name} onClick={() => onNotify(`${item.name} detail opened`)}><strong><Database />{item.name}</strong><span>{item.rows}</span><span><Clock3 />{item.updated}</span><span className="quality-good">{item.quality}</span><MoreHorizontal /></button>)}</section><section className="panel dataset-side"><div className="panel-kicker">INGESTION PIPELINE</div><h2>From source to signal</h2><div className="pipeline">{['NEW FILE','PROFILE','VALIDATE','NORMALIZE','ANALYZE'].map((step, i) => <div className={i < 3 ? 'done' : ''} key={step}><i>{i < 3 ? <CheckCircle2 /> : i + 1}</i><span>{step}</span></div>)}</div><button className="button secondary full" onClick={() => onNavigate('Workflows')}>View workflows <ArrowUpRight /></button></section></div> }
-function Quality({ onNotify }: any) { return <div className="quality-layout"><section className="panel issue-table"><PanelHeading kicker="VALIDATION QUEUE" title="Open issues" action={<button className="button secondary" onClick={() => onNotify('Validation requires an ingested dataset')}><Activity /> Run scan</button>} /><div className="analyst-empty"><ShieldCheck /><h2>No validation results yet</h2><p>Connect a source and complete ingestion before validation can inspect real rows.</p></div></section><section className="panel quality-summary"><div className="panel-kicker">QUALITY TREND</div><div className="big-score">—<span>/100</span></div><p>Available after dataset ingestion</p><div className="summary-note"><ShieldCheck /> No quality score calculated</div></section></div> }
-function Insights({ onNavigate, onNotify }: any) { return <div className="insight-grid">{[{ title: 'Private label is gaining share', text: 'Value-tier brands grew 2.1 points in grocery over the last quarter.', tag: 'Opportunity', color: 'green' }, { title: 'Media efficiency dipped', text: 'Paid social ROAS fell below the category benchmark in three regions.', tag: 'Watch', color: 'amber' }, { title: 'Premium is resilient', text: 'Premium households continue to trade up despite volume pressure.', tag: 'Signal', color: 'cyan' }].map((insight) => <section className="panel insight-card" key={insight.title}><div className={`insight-tag ${insight.color}`}>{insight.tag}</div><h2>{insight.title}</h2><p>{insight.text}</p><div className="insight-footer"><span><Sparkles /> AI surfaced</span><button className="text-button" onClick={() => { onNotify('Investigation context prepared'); onNavigate('AI Analyst') }}>Investigate <ArrowUpRight /></button></div></section>)}</div> }
-function Reports({ onNotify }: any) { return <div className="report-list"><div className="section-actions"><div><div className="panel-kicker">REPORT LIBRARY</div><h2>Generated intelligence</h2></div><button className="button primary" onClick={() => onNotify('Report generation queued')}><Plus /> Generate report</button></div>{['Q3 Category Performance Report', 'Brand Health Executive Brief', 'Retail Media Readout'].map((name, i) => <section className="panel report-row" key={name}><div className="report-icon"><FileText /></div><div><strong>{name}</strong><span>Generated {i + 1} day{i ? 's' : ''} ago · AI Analyst</span></div><em>Ready</em><button className="icon-button" onClick={() => onNotify('Report options opened')}><MoreHorizontal /></button></section>)}</div> }
-function Workflows({ onNotify }: any) { return <div className="workflow-layout"><section className="panel workflow-card"><div className="section-actions"><div><div className="panel-kicker">AUTOMATION GRAPH</div><h2>Dataset intelligence flow</h2></div><button className="button primary" onClick={() => onNotify('Workflow run requested')}><Play /> Run workflow</button></div><div className="workflow-steps">{['NEW FILE','PROFILE','VALIDATE','NORMALIZE','ANALYZE','REPORT','NOTIFY'].map((step, i) => <div className={i < 4 ? 'workflow-step complete' : i === 4 ? 'workflow-step current' : 'workflow-step'} key={step}><div className="step-node">{i < 4 ? <CheckCircle2 /> : i + 1}</div><span>{step}</span>{i < 6 && <i />}</div>)}</div></section><section className="panel run-card"><div className="panel-kicker">LATEST RUN</div><h2>Retail Sales Q3</h2><p><span className="connected-dot" /> Running validation stage</p><div className="progress"><span style={{ width: '58%' }} /></div><small>4 of 7 steps complete</small></section></div> }
-function Saved({ onNavigate }: any) { return <div className="saved-grid">{['Which brands gained share last quarter?', 'Retail sales anomaly scan', 'Q3 category narrative'].map((name, i) => <button className="panel saved-card" key={name} onClick={() => onNavigate('AI Analyst')}><div className="saved-top"><Save /><span>{i + 1} day{i ? 's' : ''} ago</span></div><h2>{name}</h2><p>AI Analyst · grounded in connected workspace datasets</p><ArrowUpRight /></button>)}</div> }
-function Settings() { return <div className="settings-layout"><section className="panel settings-nav"><button className="active">Workspace</button><button>Members & access</button><button>Notifications</button><button>Integrations</button></section><section className="panel settings-content"><div className="panel-kicker">WORKSPACE SETTINGS</div><h2>Northstar CPG</h2><div className="settings-field"><label>Workspace name</label><input value="Northstar CPG" readOnly /></div><div className="settings-field"><label>Workspace ID</label><div className="locked-input"><LockKeyhole /> northstar-cpg-prod</div></div><button className="button primary">Save changes</button></section></div> }
+function Metric({icon:Icon,label,value,delta}:{icon:any;label:string;value:string;delta:string}) { return <div className="metric-card"><div className="metric-icon"><Icon/></div><span>{label}</span><strong>{value}</strong><small>{delta}</small></div> }
+function PanelHeading({kicker,title,action}:{kicker:string;title:string;action?:React.ReactNode}) { return <div className="panel-heading"><div><div className="panel-kicker">{kicker}</div><h2>{title}</h2></div>{action}</div> }
+function Empty({icon:Icon,text}:{icon:any;text:string}) { return <div className="analyst-empty"><Icon/><p>{text}</p></div> }
+
+function LineChart({points,labels}:{points:number[];labels:string[]}) {
+  const max=Math.max(...points,1), min=Math.min(...points,0), range=max-min||1
+  const path=points.map((v,i)=>`${i===0?'M':'L'} ${(i/(Math.max(points.length-1,1))*100).toFixed(2)}% ${100-((v-min)/range*90+5)}%`).join(' ')
+  return <div className="chart-wrap"><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="line-chart" role="img" aria-label="Sales trend"><polyline points={points.map((v,i)=>`${(i/(Math.max(points.length-1,1))*100).toFixed(2)},${100-((v-min)/range*90+5)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1.4" vectorEffect="non-scaling-stroke"/><path d={path} fill="none" stroke="currentColor" strokeWidth="0" /></svg><div className="chart-labels">{labels.filter((_,i)=>i===0||i===labels.length-1||i===Math.floor(labels.length/2)).map((x,i)=><span key={i}>{x}</span>)}</div></div>
+}
+function Bars({items}:{items:{label:string;value:number}[]}) { const max=Math.max(...items.map(x=>x.value),1); return <div className="bar-list">{items.map(x=><div className="bar-row" key={x.label}><span title={x.label}>{x.label}</span><div className="bar-track"><i style={{width:`${Math.max(2,x.value/max*100)}%`}}/></div><b>{x.value.toFixed(1)}%</b></div>)}</div> }
+
+function Analyst({prompt,setPrompt,answer,ask}:{prompt:string;setPrompt:(x:string)=>void;answer:any;ask:()=>void}) {
+  return <section className="analyst-workspace"><div className="terminal-header"><span className="terminal-dot"/><span>CPGist Analyst / grounded mode</span><span className="terminal-status">● {answer ? 'COMPLETE' : 'READY'}</span></div><div className="analyst-body">
+    {answer ? <div className="answer"><div className="answer-label">ANALYSIS COMPLETE <span>· {answer.model || 'Ollama'}</span></div><p>{answer.answer}</p><div className="citation"><Database/> Dataset <span>{answer.dataset}</span></div><div className="citation"><Target/> Grounding confidence <strong>{answer.grounding?.score?.toFixed(1)}%</strong><span>{answer.grounding?.method}</span></div><div className="answer-actions"><button className="button secondary" onClick={()=>navigator.clipboard?.writeText(answer.answer).then(()=>{})}><Save/> Copy answer</button><button className="button secondary" onClick={()=>{const blob=new Blob([answer.answer],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cpgist-analysis.txt';a.click()}}><Download/> Export</button></div></div> : <Empty icon={Sparkles} text="Ask a question about the selected dataset. Answers are constrained to server-side evidence."/>}
+    <div className="prompt-box"><textarea value={prompt} onChange={e=>setPrompt(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}}} placeholder="e.g. Compare the top brands by sales and market share..."/><button className="send-button" onClick={ask}><Play/></button></div>
+    <div className="prompt-hints"><button onClick={()=>setPrompt('Which brands have the highest market share?')}>Brand share</button><button onClick={()=>setPrompt('Find sales anomalies and explain the observed periods.')}>Anomalies</button><button onClick={()=>setPrompt('Summarize the latest sales trend.')}>Trend summary</button></div>
+  </div></section>
+}
+
+function Sources({notify}:{notify:(x:string)=>void}) {
+  const scrape=async()=>{const url=window.prompt('URL to research with Agent-Reach');if(!url)return;notify('Agent-Reach is scraping...');try{const r=await fetch('/api/research',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Scrape failed');console.log('Agent-Reach result',d.result);notify('Agent-Reach completed. Result logged to the browser console.')}catch(e){notify(e instanceof Error?e.message:'Agent-Reach failed.')}}
+  return <div className="sources-grid"><SourceCard icon={GitBranch} name="GitHub Syndicate" type="Repository" detail="Repository credentials are kept server-side. Configure them in deployment settings." onClick={()=>notify('Configure the GitHub source credentials in your deployment environment.')} /><SourceCard icon={HardDrive} name="Google Drive" type="Cloud storage" detail="OAuth flow is implemented; add provider credentials and the callback URL." href="/api/connectors/google" /><SourceCard icon={Network} name="Microsoft Graph" type="Enterprise data" detail="OAuth flow is implemented; add provider credentials and the callback URL." href="/api/connectors/microsoft" /><SourceCard icon={GitCompare} name="Agent-Reach" type="Research / scraping" detail="Run a real scrape through the configured Agent-Reach service. External evidence is kept separate from sales facts." onClick={scrape} actionLabel="Scrape a URL" /></div> }
+function SourceCard({icon:Icon,name,type,detail,onClick,href,actionLabel}:{icon:any;name:string;type:string;detail:string;onClick?:()=>void;href?:string;actionLabel?:string}) { return <section className="panel source-card"><div className="source-icon"><Icon/></div><div className="source-title"><h2>{name}</h2><span>{type}</span></div><div className="source-status not-configured"><i/> Configuration required</div><p>{detail}</p>{href?<a className="button secondary full" href={href}>Connect</a>:<button className="button secondary full" onClick={onClick}>{actionLabel??'Configure'}</button>}</section> }
+
+function DatasetView({datasets,analytics,onUpload,onRefresh,onSelect}:{datasets:Dataset[];analytics:Analytics|null;onUpload:()=>void;onRefresh:()=>void;onSelect:(id:string)=>void}) { return <div className="dataset-layout"><section className="panel data-table"><div className="table-toolbar"><div><div className="panel-kicker">CANONICAL DATASETS</div><h2>All datasets <span>{datasets.length}</span></h2></div><div className="toolbar-actions"><button className="button secondary" onClick={onRefresh}><RefreshCw/> Refresh</button><button className="button primary" onClick={onUpload}><Upload/> Import CSV</button></div></div><div className="table-head"><span>Dataset</span><span>Rows</span><span>Status</span><span>Updated</span></div>{datasets.length?datasets.map(d=><button className="dataset-row" key={d.id} onClick={()=>onSelect(d.id)}><strong><Database/>{d.name}</strong><span>{d.row_count.toLocaleString()}</span><span>{d.status}</span><span>{new Date(d.updated_at).toLocaleString()}</span></button>):<Empty icon={Database} text="No datasets yet. Import a CSV to begin."/>}</section><section className="panel dataset-side"><div className="panel-kicker">ACTIVE DATASET</div><h2>{analytics?.dataset.name ?? 'None selected'}</h2><p>{analytics?`${analytics.metrics.rowCount.toLocaleString()} ingested facts. Analytics below are calculated from all fetched rows.`:'Select a ready dataset.'}</p>{analytics&&<div className="pipeline"><div className="done"><i><CheckCircle2/></i><span>INGESTED</span></div><div className="done"><i><CheckCircle2/></i><span>PROFILED</span></div><div className="done"><i><CheckCircle2/></i><span>ANALYZED</span></div></div>}</section></div> }
+
+function Validation({analytics}:{analytics:Analytics|null}) { const score=analytics?Math.max(0,100-(analytics.anomalies.length/Math.max(analytics.metrics.rowCount,1))*100):null; return <div className="quality-layout"><section className="panel issue-table"><PanelHeading kicker="VALIDATION" title="Statistical and ingestion checks"/>{analytics?.anomalies.length?analytics.anomalies.map((a,i)=><div className="activity-row" key={i}><div><strong>Sales outlier</strong><span>{a.period}: {money(a.sales)} (z {a.zScore.toFixed(2)})</span></div><em>warning</em></div>):<Empty icon={ShieldCheck} text="No statistical outliers detected in the selected dataset."/>}</section><section className="panel quality-summary"><div className="panel-kicker">DATA HEALTH</div><div className="big-score">{score==null?'—':score.toFixed(1)}<span>/100</span></div><p>Derived from observed outlier rate; not a fabricated quality claim.</p></section></div> }
+
+function Comparison({analytics,brands,selected,brandIds,setBrandIds,datasetId}:{analytics:Analytics|null;brands:Brand[];selected:any[];brandIds:string[];setBrandIds:(x:string[])=>void;datasetId:string}) {
+  const toggle=(id:string)=>setBrandIds(brandIds.includes(id)?brandIds.filter(x=>x!==id):brandIds.length<4?[...brandIds,id]:brandIds)
+  const rows=analytics?.comparison?.filter((x:any)=>brandIds.length?brandIds.includes(x.id):true) ?? analytics?.brands.slice(0,8) ?? []
+  return <div className="dashboard-grid"><section className="panel"><PanelHeading kicker="BRAND SELECTION" title="Compare up to four brands" action={<span>{brandIds.length}/4 selected</span>}/><div className="brand-picker">{brands.map(b=><button className={`button ${brandIds.includes(b.id)?'primary':'secondary'}`} key={b.id} onClick={()=>toggle(b.id)}>{brandIds.includes(b.id)?'✓ ':''}{b.name}</button>)}</div></section><section className="panel"><PanelHeading kicker="COMPARISON" title="Observed performance" action={<span>Real sales facts</span>}/>{rows.length?<div className="table-head"><span>Brand</span><span>Sales</span><span>Share</span><span>Units</span><span>Growth</span></div>:<Empty icon={GitCompare} text="Select brands to compare."/>}{rows.map((r:any)=><div className="dataset-row" key={r.id}><strong>{r.name}</strong><span>{money(r.sales)}</span><span>{pct(r.marketShare)}</span><span>{money(r.units)}</span><span>{pct(r.latestGrowth)}</span></div>)}</section>{selected.map((b:any)=><section className="panel" key={b.id}><PanelHeading kicker="BRAND DETAIL" title={b.name}/><div className="metric-row"><Metric icon={BarChart3} label="Sales" value={money(b.sales)} delta="Selected dataset"/><Metric icon={Target} label="Market share" value={pct(b.marketShare)} delta="Sales / total sales"/><Metric icon={Activity} label="Period growth" value={pct(b.latestGrowth)} delta="Latest two observed periods"/></div></section>)}</div>
+}
+
+function Reports({datasets,datasetId,notify}:{datasets:Dataset[];datasetId:string;notify:(x:string)=>void}) { const [reports,setReports]=useState<any[]>([]); const [name,setName]=useState(''); const load=()=>fetch('/api/reports').then(r=>r.json()).then(d=>setReports(d.reports??[])).catch(()=>{}); useEffect(()=>{load()},[]); const create=async()=>{if(!name.trim())return notify('Enter a report name');const r=await fetch('/api/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,datasetId})});const d=await r.json();if(!r.ok)return notify(d.error||'Could not create report');setName('');load();notify('Report created')};return <div className="dashboard-grid"><section className="panel"><PanelHeading kicker="REPORT BUILDER" title="Create from verified analytics"/><div className="settings-field"><label>Report name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Brand performance report"/></div><button className="button primary" onClick={create} disabled={!datasetId}><FileBarChart/> Create report</button><p className="muted-copy">Reports are stored in Supabase. Export selected analytics from the Analyst after generation.</p></section><section className="panel"><PanelHeading kicker="REPORT LIBRARY" title={`${reports.length} reports`}/>{reports.length?reports.map(r=><div className="activity-row" key={r.id}><div><strong>{r.name}</strong><span>{new Date(r.created_at).toLocaleString()}</span></div><em>{r.status}</em></div>):<Empty icon={FileText} text="No reports saved yet."/ >}</section></div> }
+
+function Workflows({datasets,datasetId,notify}:{datasets:Dataset[];datasetId:string;notify:(x:string)=>void}) { const [flows,setFlows]=useState<any[]>([]); const load=()=>fetch('/api/workflows').then(r=>r.json()).then(d=>setFlows(d.workflows??[])).catch(()=>{}); useEffect(()=>{load()},[]); const create=async()=>{const r=await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`CPG ingestion ${new Date().toLocaleDateString()}`})});const d=await r.json();if(!r.ok)return notify(d.error||'Unable to create workflow');load();notify('Workflow created')}; const run=async(id:string)=>{const r=await fetch('/api/workflows/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflowId:id,datasetId})});const d=await r.json();notify(r.ok?`Workflow ${d.run.status}`:(d.error||'Workflow failed'))}; return <div className="dashboard-grid"><section className="panel"><PanelHeading kicker="AUTOMATION" title="Data-to-insight workflow" action={<button className="button primary" onClick={create}><Plus/> New workflow</button>}/><div className="workflow-steps">{['INGEST','VALIDATE','ANALYZE','REPORT'].map((x,i)=><div className="workflow-step complete" key={x}><div className="step-node">{i+1}</div><span>{x}</span>{i<3&&<i/>}</div>)}</div></section><section className="panel">{flows.length?flows.map(f=><div className="activity-row" key={f.id}><div><strong>{f.name}</strong><span>Stored workflow definition</span></div><button className="button secondary" onClick={()=>run(f.id)} disabled={!datasetId}><Play/> Run</button></div>):<Empty icon={Workflow} text="Create a workflow to run deterministic analysis on a selected dataset."/>}</section></div> }
+
+function Saved() { const [items,setItems]=useState<any[]>([]); const load=()=>fetch('/api/analyses').then(r=>r.json()).then(d=>setItems(d.analyses??[])).catch(()=>{}); useEffect(()=>{load()},[]); const del=async(id:string)=>{await fetch(`/api/analyses?id=${id}`,{method:'DELETE'});load()};return <section className="panel"><PanelHeading kicker="SAVED ANALYSES" title={`${items.length} saved questions`}/>{items.length?items.map(x=><div className="activity-row" key={x.id}><div><strong>{x.prompt}</strong><span>{x.result?.dataset??'Dataset'} · grounding {x.result?.grounding?.score?.toFixed?.(1)??'—'}%</span></div><button className="icon-button" onClick={()=>del(x.id)} aria-label="Delete"><Trash2/></button></div>):<Empty icon={Save} text="Ask the Analyst to create a saved analysis."/>}</section> }
+
+function Settings() { return <div className="settings-layout"><section className="panel settings-content"><div className="panel-kicker">WORKSPACE</div><h2>CPGist AI</h2><p className="muted-copy">Server credentials are intentionally never exposed to the browser. Configure Supabase, Ollama, and optional Agent-Reach variables in your deployment environment.</p><div className="settings-field"><label>AI grounding</label><div className="locked-input"><Target/> Deterministic evidence coverage</div></div><div className="settings-field"><label>Analytics</label><div className="locked-input"><BarChart3/> Calculated from complete paginated fact retrieval</div></div></section></div> }
+
+function UploadModal({onClose,onUpload,uploading}:{onClose:()=>void;onUpload:(f:File,n:string)=>void;uploading:boolean}) { const [name,setName]=useState(''); const [file,setFile]=useState<File|null>(null); const ref=useRef<HTMLInputElement>(null);return <div className="command-backdrop"><div className="panel" style={{width:'min(520px,92vw)',padding:24}}><div className="panel-heading"><div><div className="panel-kicker">INGESTION</div><h2>Import CSV dataset</h2></div><button className="icon-button" onClick={onClose}><X/></button></div><div className="settings-field"><label>Dataset name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Retail Sales Q3"/></div><div className="settings-field"><label>CSV file</label><input ref={ref} type="file" accept=".csv,text/csv" onChange={e=>setFile(e.target.files?.[0]??null)}/></div><p className="muted-copy">Expected measures include sales/revenue/value and/or units/volume/quantity. Brand, product, retailer, category and period columns are detected automatically.</p><button className="button primary full" disabled={!file||uploading} onClick={()=>file&&onUpload(file,name)}>{uploading?<><RefreshCw className="spin"/> Importing...</>:<><Upload/> Import and analyze</>}</button></div></div> }

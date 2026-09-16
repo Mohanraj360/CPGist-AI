@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_CLIENT_ID
   const redirectUri = process.env.GOOGLE_REDIRECT_URI
-  if (!clientId || !(process.env.GOOGLE_CLIENT_SECRET || process.env.secret) || !redirectUri) {
+  if (!clientId || !process.env.GOOGLE_CLIENT_SECRET || !redirectUri) {
     return NextResponse.json({ configured: false, error: 'Google Drive is not configured. Add OAuth credentials and a redirect URI to enable it.' }, { status: 503 })
   }
   const state = crypto.randomUUID()
