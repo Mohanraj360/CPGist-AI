@@ -1,0 +1,8 @@
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+export const dynamic = 'force-dynamic'
+
+export async function GET() { try { const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return NextResponse.json({ reports: [] }); const { data, error } = await supabase.from('reports').select('id,name,status,dataset_id,created_at,updated_at').order('updated_at', { ascending: false }); if (error) return NextResponse.json({ reports: [], error: 'Report storage is not available yet.' }); return NextResponse.json({ reports: data ?? [] }) } catch { return NextResponse.json({ reports: [], configured: false }) } }
+
+export async function POST(request: Request) { try { const supabase = await createClient(); const { data: { user } } = await supabase.auth.getUser(); if (!user) return NextResponse.json({ error: 'Sign in is required.' }, { status: 401 }); const body = await request.json(); const name = typeof body.name === 'string' ? body.name.trim().slice(0, 160) : ''; if (!name) return NextResponse.json({ error: 'A report name is required.' }, { status: 400 }); const { data, error } = await supabase.from('reports').insert({ name, dataset_id: typeof body.datasetId === 'string' ? body.datasetId : null, created_by: user.id }).select('id,name,status,created_at').single(); if (error) return NextResponse.json({ error: 'Report storage is not available yet.' }, { status: 503 }); return NextResponse.json({ report: data }, { status: 201 }) } catch { return NextResponse.json({ error: 'Unable to create report.' }, { status: 500 }) } }
