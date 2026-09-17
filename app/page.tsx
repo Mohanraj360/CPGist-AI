@@ -41,6 +41,7 @@ export default function Home() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
+  const [supabaseConfigMissing, setSupabaseConfigMissing] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [query, setQuery] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
@@ -57,9 +58,15 @@ export default function Home() {
 
   async function loadDatasets() {
     const response = await fetch('/api/datasets', { cache: 'no-store' })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Unable to load datasets')
-    setDatasets(data.datasets ?? [])
+  const data = await response.json()
+  if (data.configured === false) {
+    setSupabaseConfigMissing(true)
+    setDatasets([])
+    return
+  }
+  if (!response.ok) throw new Error(data.error || 'Unable to load datasets')
+  setSupabaseConfigMissing(false)
+  setDatasets(data.datasets ?? [])
     if (!datasetId && data.datasets?.length) {
       const ready = data.datasets.find((d: Dataset) => d.status === 'ready') ?? data.datasets[0]
       setDatasetId(ready.id)
@@ -82,9 +89,15 @@ export default function Home() {
 
   useEffect(() => {
     fetch('/api/datasets', { cache: 'no-store' }).then(async r => {
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error || 'Unable to load datasets')
-      setDatasets(d.datasets ?? [])
+  const d = await r.json()
+  if (d.configured === false) {
+    setSupabaseConfigMissing(true)
+    setDatasets([])
+    return
+  }
+  if (!r.ok) throw new Error(d.error || 'Unable to load datasets')
+  setSupabaseConfigMissing(false)
+  setDatasets(d.datasets ?? [])
       const ready = (d.datasets ?? []).find((x: Dataset) => x.status === 'ready') ?? d.datasets?.[0]
       if (ready) setDatasetId(ready.id)
     }).catch(e => { notify(e instanceof Error ? e.message : 'Unable to load datasets'); setLoading(false) })
@@ -141,6 +154,7 @@ export default function Home() {
       <header className="topbar"><button className="icon-button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle navigation"><Menu /></button><button className="global-search" onClick={() => setCommandOpen(true)}><Search /><span>Search datasets, brands, reports...</span><kbd>⌘ K</kbd></button><div className="top-actions"><button className="icon-button" onClick={refresh} title="Refresh"><RefreshCw className={refreshing ? 'spin' : ''} /></button><span className="live-dot"><i /> Live data</span><button className="icon-button" onClick={() => setActive('Validation')}><Bell /></button><button className="top-avatar" onClick={() => setActive('Settings')}>{initials}</button></div></header>
 
       <div className="content-wrap page-enter">
+        {supabaseConfigMissing && <section className="panel config-panel" role="alert"><div><div className="eyebrow">DEPLOYMENT CONFIGURATION</div><h2>Connect Supabase to load your workspace</h2><p>This deployment needs <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> (or the legacy <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>) configured in its environment.</p></div></section>}
         <div className="page-heading"><div><div className="eyebrow">CPGIST AI / WORKSPACE</div><h1>{active}</h1><p>{active === 'Overview' ? 'Evidence-first consumer packaged goods intelligence.' : `Work with real data in ${active.toLowerCase()}.`}</p></div><div className="heading-actions">
           <select className="button secondary" value={datasetId} onChange={e => setDatasetId(e.target.value)} aria-label="Active dataset"><option value="">Select dataset</option>{datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
           <button className="button primary" onClick={() => active === 'Datasets' ? setUploadOpen(true) : setActive('Workflows')}><Plus /> {active === 'Datasets' ? 'Import dataset' : 'New workflow'}</button>
