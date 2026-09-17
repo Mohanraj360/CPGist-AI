@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getDemoDataset } from '@/lib/cpg/demo-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,15 +39,15 @@ export async function GET() {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ datasets: [] })
+    if (!user) return NextResponse.json({ datasets: [getDemoDataset()], demo: true })
     const { data, error } = await supabase.from('datasets').select('id,name,source,status,row_count,updated_at').order('updated_at', { ascending: false })
-    if (error) return NextResponse.json({ datasets: [], configured: true, error: error.message }, { status: 503 })
+    if (error) return NextResponse.json({ datasets: [getDemoDataset()], demo: true, warning: error.message })
     const datasets = data ?? []
     if (!datasets.length) {
-      try { return NextResponse.json({ datasets: await ensureDemoDataset(user.id) }) } catch (e) { return NextResponse.json({ datasets: [], error: e instanceof Error ? e.message : 'Unable to create demo dataset.' }, { status: 503 }) }
+      try { return NextResponse.json({ datasets: await ensureDemoDataset(user.id) }) } catch (e) { return NextResponse.json({ datasets: [getDemoDataset()], demo: true, warning: e instanceof Error ? e.message : 'Demo dataset fallback active.' }) }
     }
     return NextResponse.json({ datasets })
   } catch (error) {
-    return NextResponse.json({ datasets: [], configured: false, error: error instanceof Error ? error.message : 'Dataset storage is unavailable.' }, { status: 503 })
+    return NextResponse.json({ datasets: [getDemoDataset()], demo: true, warning: error instanceof Error ? error.message : 'Supabase is unavailable; demo data is active.' })
   }
 }
