@@ -52,15 +52,19 @@ export async function POST(request: Request) {
 
     let datasetId = typeof body.datasetId === 'string' ? body.datasetId : null
     if (!datasetId) {
-      const { data } = await supabase.from('datasets').select('id').eq('status', 'ready').order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      const { data, error } = await supabase.from('datasets').select('id').eq('status', 'ready').order('updated_at', { ascending: false }).limit(1).maybeSingle()
+      if (error) throw new Error(`Unable to select a dataset: ${error.message}`)
       datasetId = data?.id ?? null
     }
     if (!datasetId) return NextResponse.json({ error: 'Select or ingest a dataset before asking the AI Analyst.' }, { status: 422 })
 
-    const { data: dataset } = await supabase.from('datasets').select('id,name').eq('id', datasetId).single()
-    if (!dataset) return NextResponse.json({ error: 'Selected dataset was not found.' }, { status: 404 })
+    const { data: dataset, error: datasetError } = await supabase.from('datasets').select('id,name,status').eq('id', datasetId).single()
+    if (datasetError || !dataset) return NextResponse.json({ error: 'Selected dataset was not found or is not accessible.' }, { status: 404 })
+    if (dataset.status !== 'ready') return NextResponse.json({ error: 'The selected dataset is not ready for analysis yet.' }, { status: 422 })
 
     const analytics = await aggregateAnalytics(supabase, datasetId)
+    if (!analytics.metrics.rowCount) return NextResponse.json({ error: 'The selected dataset contains no analyzable sales facts.' }, { status: 422 })
+
     const evidence = JSON.stringify({
       dataset: dataset.name,
       metrics: analytics.metrics,
@@ -71,11 +75,13 @@ export async function POST(request: Request) {
       anomalies: analytics.anomalies.slice(0, 20),
     })
 
-    const raw = await generateWithOllama(`You are CPGist AI, a grounded consumer packaged goods analyst.
-Use ONLY the supplied dataset evidence. Do not invent values, brands, periods, sources, or causal explanations.
-If the evidence cannot answer a question, explicitly say that it cannot be determined from this dataset.
-Do not claim statistical significance unless the evidence provides it.
-Return JSON only: {"answer":"concise answer with exact values from evidence where relevant"}.
+    const raw = await generateWithOllama(`You are CPGist AI, an evidence-first consumer packaged goods analyst.
+Use ONLY the supplied dataset evidence. Never invent values, brands, periods, sources, causal explanations, or calculations that cannot be derived from the evidence.
+For ranking questions, use the supplied ranked values rather than guessing.
+For calculations, use the supplied independently computed metrics and report their exact values.
+If the evidence cannot answer the question, say that it cannot be determined from this dataset.
+Do not claim statistical significance or causality unless the evidence provides it.
+Return JSON only: {"answer":"concise answer grounded in the evidence"}.
 
 DATASET EVIDENCE:
 ${evidence}
@@ -83,27 +89,28 @@ ${evidence}
 USER QUESTION:
 ${prompt}`)
     const answer = parseModelResponse(raw)
-    const grounding = calculateGroundingScore(answer, evidence)
+    if (!answer) return NextResponse.json({ error: 'The Analyst returned no answer.' }, { status: 503 })
 
+    const accuracy = calculateGroundingScore(answer, evidence)
     const result = {
       answer,
       dataset: dataset.name,
       provider: 'ollama',
       model: process.env.OLLAMA_MODEL ?? 'unknown',
-      grounding,
-      trace: ['Intent detected', 'Authorized dataset loaded', 'All dataset facts aggregated server-side', 'Evidence supplied to model', 'Response grounding measured deterministically'],
+      grounding: accuracy,
+      accuracy,
+      trace: ['Intent detected', 'Authorized dataset loaded', 'All dataset facts aggregated server-side', 'Evidence supplied to model', 'Dataset-verified answer accuracy calculated from independently computed evidence'],
     }
 
-    const { data: saved } = await supabase.from('analyses').insert({
+    const { data: saved, error: saveError } = await supabase.from('analyses').insert({
       dataset_id: datasetId, prompt, result, created_by: user.id,
     }).select('id').single()
+    if (saveError) console.error('[analyst] save failed', saveError)
 
     return NextResponse.json({ ...result, datasetId, analysisId: saved?.id ?? null })
   } catch (error) {
     console.error('[analyst]', error)
-    const message = error instanceof Error && error.message !== 'Ollama is not configured.'
-      ? error.message
-      : 'AI Analyst is unavailable. Check OLLAMA_BASE_URL and OLLAMA_MODEL.'
+    const message = error instanceof Error ? error.message : 'AI Analyst is unavailable.'
     return NextResponse.json({ error: message }, { status: 503 })
   }
 }
