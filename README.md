@@ -173,19 +173,6 @@ The application now treats Supabase as the source of truth for dashboard data. T
 - Workflow creation and execution against a selected dataset
 - Google Drive and Microsoft Graph OAuth start/callback routes
 - Connector status endpoint
-- Agent-Reach HTTP adapter at `POST /api/research`
-
-### Agent-Reach
-
-Agent-Reach is kept as an external research layer rather than mixed into syndicated sales facts. Configure the endpoint exposed by your Agent-Reach deployment:
-
-```env
-AGENT_REACH_BASE_URL=
-AGENT_REACH_API_KEY=
-AGENT_REACH_SCRAPE_PATH=/scrape
-```
-
-The exact path can be changed with `AGENT_REACH_SCRAPE_PATH` so the adapter does not assume a particular Agent-Reach deployment contract.
 
 ### Connector security
 
