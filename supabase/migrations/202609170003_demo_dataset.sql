@@ -21,18 +21,20 @@ BEGIN
   RETURNING id INTO ds;
 
   INSERT INTO public.brands (name, category, parent_company, org_id)
-  VALUES ('Apex Foods', 'Snacks', 'Apex Consumer', 1),
-         ('FreshField', 'Snacks', 'FreshField Group', 1),
-         ('Urban Harvest', 'Snacks', 'Urban Harvest Co', 1)
-  RETURNING id INTO apex;
-
+  VALUES ('Apex Foods', 'Snacks', 'Apex Consumer', 1);
+  SELECT id INTO apex FROM public.brands WHERE name = 'Apex Foods' AND org_id = 1 ORDER BY id DESC LIMIT 1;
+  INSERT INTO public.brands (name, category, parent_company, org_id)
+  VALUES ('FreshField', 'Snacks', 'FreshField Group', 1);
   SELECT id INTO fresh FROM public.brands WHERE name = 'FreshField' AND org_id = 1 ORDER BY id DESC LIMIT 1;
+  INSERT INTO public.brands (name, category, parent_company, org_id)
+  VALUES ('Urban Harvest', 'Snacks', 'Urban Harvest Co', 1);
   SELECT id INTO urban FROM public.brands WHERE name = 'Urban Harvest' AND org_id = 1 ORDER BY id DESC LIMIT 1;
 
   INSERT INTO public.retailers (name, channel, region, total_stores, org_id)
-  VALUES ('QuickCart', 'Quick Commerce', 'India', 850, 1),
-         ('DailyMart', 'Modern Trade', 'India', 420, 1)
-  RETURNING id INTO qc;
+  VALUES ('QuickCart', 'Quick Commerce', 'India', 850, 1);
+  SELECT id INTO qc FROM public.retailers WHERE name = 'QuickCart' AND org_id = 1 ORDER BY id DESC LIMIT 1;
+  INSERT INTO public.retailers (name, channel, region, total_stores, org_id)
+  VALUES ('DailyMart', 'Modern Trade', 'India', 420, 1);
   SELECT id INTO dm FROM public.retailers WHERE name = 'DailyMart' AND org_id = 1 ORDER BY id DESC LIMIT 1;
 
   INSERT INTO public.products (brand_id, name, category, subcategory, org_id)
@@ -75,7 +77,6 @@ BEGIN
   UPDATE public.datasets SET row_count = 24, status = 'ready', updated_at = now() WHERE id = ds;
 END $$;
 
--- Populate the compatibility aliases and hashes for the newly seeded facts.
 UPDATE public.sales_facts SET period = week_ending WHERE dataset_id IS NOT NULL AND period IS NULL;
 UPDATE public.sales_facts SET sales = dollar_sales WHERE dataset_id IS NOT NULL AND sales IS NULL;
 UPDATE public.sales_facts SET distribution = acv_distribution WHERE dataset_id IS NOT NULL AND distribution IS NULL;
