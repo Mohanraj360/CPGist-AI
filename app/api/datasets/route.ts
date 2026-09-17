@@ -8,9 +8,9 @@ async function ensureDemoDataset(userId: string) {
   const admin = createAdminClient()
   const { data: profile } = await admin.from('profiles').select('org_id').eq('id', userId).maybeSingle()
   const orgId = profile?.org_id ?? 1
-  const { data: existing } = await admin.from('datasets').select('id,name').eq('org_id', orgId).limit(1)
+  const { data: existing } = await admin.from('datasets').select('id,name,source,status,row_count,updated_at').eq('org_id', orgId).limit(1)
   if (existing?.length) return existing
-  const { data: dataset, error } = await admin.from('datasets').insert({ key: `cpgist_demo_${Date.now()}`, name: 'CPGist Demo Retail Sales', table_name: 'sales_facts', source_type: 'demo', source: 'Built-in synthetic demo', status: 'ready', row_count: 24, org_id: orgId, freshness_at: new Date().toISOString() }).select('id,name').single()
+  const { data: dataset, error } = await admin.from('datasets').insert({ key: `cpgist_demo_${Date.now()}`, name: 'CPGist Demo Retail Sales', table_name: 'sales_facts', source_type: 'demo', source: 'Built-in synthetic demo', status: 'ready', row_count: 24, org_id: orgId, freshness_at: new Date().toISOString() }).select('id').single()
   if (error || !dataset) throw error ?? new Error('Unable to create demo dataset.')
   const brands = await admin.from('brands').insert([
     { name: 'Apex Foods', category: 'Snacks', parent_company: 'Apex Foods Group', org_id: orgId, dataset_id: dataset.id },
@@ -29,7 +29,9 @@ async function ensureDemoDataset(userId: string) {
   for(let b=0;b<3;b++) for(let p=0;p<4;p++) { const sales=matrix[b][p]; const units=Math.round(sales/(5.5+b*.7)); const distribution=72+b*5+p; facts.push({dataset_id:dataset.id,brand_id:brands.data![b].id,retailer_id:retailers.data![p%2].id,category:'Snacks',period:periods[p],sales,dollar_sales:sales,week_ending:periods[p],units,price:sales/units,distribution,acv_distribution:distribution,on_promo:p===1||p===3,promo_type:p===1||p===3?'Feature':null,discount_depth_pct:p===1||p===3?10:0,org_id:orgId}) }
   const inserted=await admin.from('sales_facts').insert(facts)
   if(inserted.error) throw inserted.error
-  return [dataset]
+  const { data: ready, error: readyError } = await admin.from('datasets').select('id,name,source,status,row_count,updated_at').eq('id',dataset.id).single()
+  if (readyError || !ready) throw readyError ?? new Error('Demo dataset was created but could not be loaded.')
+  return [ready]
 }
 
 export async function GET() {
