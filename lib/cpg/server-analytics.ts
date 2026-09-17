@@ -4,9 +4,9 @@ import { calculateGrowth, calculateMarketShare } from './analytics'
 export type Fact = {
   period: string | null
   category: string | null
-  brand_id?: string | null
-  retailer_id?: string | null
-  product_id?: string | null
+  brand_id?: string | number | null
+  retailer_id?: string | number | null
+  product_id?: string | number | null
   sales: number | null
   units: number | null
   distribution: number | null
@@ -15,35 +15,6 @@ export type Fact = {
 }
 
 type AggregateGroup = { key: string; sales: number; units: number; rows: number }
-
-async function fetchAll<T>(queryFactory: (from: number, to: number) => any, batchSize = 1000): Promise<T[]> {
-  const all: T[] = []
-  for (let from = 0; ; from += batchSize) {
-    const { data, error } = await queryFactory(from, from + batchSize - 1)
-    if (error) throw error
-    const rows = (data ?? []) as T[]
-    all.push(...rows)
-    if (rows.length < batchSize) break
-  }
-  return all
-}
-
-export async function fetchFacts(supabase: SupabaseClient, datasetId: string) {
-  return fetchAll<Fact>((from, to) =>
-    supabase.from('sales_facts')
-      .select('period,category,brand_id,retailer_id,product_id,sales,units,distribution,price,on_promo')
-      .eq('dataset_id', datasetId)
-      .order('period', { ascending: true, nullsFirst: true })
-      .range(from, to)
-  )
-}
-
-async function fetchNames(supabase: SupabaseClient, table: 'brands' | 'retailers' | 'products', datasetId: string) {
-  const rows = await fetchAll<{ id: string; name: string }>((from, to) =>
-    supabase.from(table).select('id,name').eq('dataset_id', datasetId).order('name').range(from, to)
-  )
-  return new Map(rows.map((row) => [row.id, row.name]))
-}
 
 function aggregateBy(facts: Fact[], select: (fact: Fact) => string | null | undefined) {
   const groups = new Map<string, AggregateGroup>()
@@ -70,116 +41,123 @@ function trendFor(facts: Fact[]) {
   return [...map.values()].sort((a, b) => a.period.localeCompare(b.period))
 }
 
-export async function queryMetrics(supabase: SupabaseClient, datasetId: string) {
-  const facts = await fetchFacts(supabase, datasetId)
-  return metricsFromFacts(facts)
-}
-
+/** Small-data helper retained for filtered drilldowns and unit tests. */
 export function metricsFromFacts(facts: Fact[]) {
   const sales = facts.reduce((sum, row) => sum + (Number(row.sales) || 0), 0)
   const units = facts.reduce((sum, row) => sum + (Number(row.units) || 0), 0)
   const promoRows = facts.filter((row) => row.on_promo === true)
-  const avgDistributionRows = facts.filter((row) => Number.isFinite(Number(row.distribution)))
-  const averageDistribution = avgDistributionRows.length
-    ? avgDistributionRows.reduce((sum, row) => sum + Number(row.distribution), 0) / avgDistributionRows.length
-    : null
+  const distributionRows = facts.filter((row) => Number.isFinite(Number(row.distribution)))
   return {
     rowCount: facts.length,
     sales,
     units,
     averagePrice: units ? sales / units : null,
     promotionRate: facts.length ? (promoRows.length / facts.length) * 100 : null,
-    averageDistribution,
+    averageDistribution: distributionRows.length
+      ? distributionRows.reduce((sum, row) => sum + Number(row.distribution), 0) / distributionRows.length
+      : null,
+  }
+}
+
+type RpcAnalytics = {
+  metrics?: Record<string, unknown>
+  trend?: unknown[]
+  categories?: unknown[]
+  brands?: unknown[]
+  retailers?: unknown[]
+  promo?: Record<string, unknown>
+  elasticity?: Record<string, unknown>
+  competitiveSignals?: unknown[]
+  brandRelationships?: unknown[]
+  distributionWhitespace?: unknown[]
+  anomalies?: unknown[]
+  lineage?: Record<string, unknown>
+}
+
+function normaliseRpcAnalytics(payload: RpcAnalytics | null) {
+  if (!payload?.metrics) throw new Error('The CPG analytics database function returned no metrics.')
+  const m = payload.metrics
+  return {
+    metrics: {
+      rowCount: Number(m.rowCount ?? 0),
+      sales: Number(m.sales ?? 0),
+      units: Number(m.units ?? 0),
+      averagePrice: m.averagePrice == null ? null : Number(m.averagePrice),
+      promotionRate: m.promotionRate == null ? null : Number(m.promotionRate),
+      averageDistribution: m.averageDistribution == null ? null : Number(m.averageDistribution),
+      minPeriod: m.minPeriod ?? null,
+      maxPeriod: m.maxPeriod ?? null,
+    },
+    trend: payload.trend ?? [],
+    categories: payload.categories ?? [],
+    brands: payload.brands ?? [],
+    retailers: payload.retailers ?? [],
+    promo: payload.promo ?? {},
+    elasticity: payload.elasticity ?? {},
+    competitiveSignals: payload.competitiveSignals ?? [],
+    brandRelationships: payload.brandRelationships ?? [],
+    distributionWhitespace: payload.distributionWhitespace ?? [],
+    anomalies: payload.anomalies ?? [],
+    lineage: payload.lineage ?? {},
   }
 }
 
 export async function aggregateAnalytics(supabase: SupabaseClient, datasetId: string) {
-  const facts = await fetchFacts(supabase, datasetId)
-  const [brands, retailers, anomalies] = await Promise.all([
-    fetchNames(supabase, 'brands', datasetId),
-    fetchNames(supabase, 'retailers', datasetId),
-    detectAnomaliesFromFacts(facts),
-  ])
-  const totalSales = facts.reduce((sum, fact) => sum + (Number(fact.sales) || 0), 0)
-  const summarize = (select: (fact: Fact) => string | null | undefined, names?: Map<string, string>) =>
-    aggregateBy(facts, select).map(({ key, ...value }) => ({
-      id: key,
-      name: names?.get(key) ?? key,
-      ...value,
-      marketShare: calculateMarketShare(value.sales, totalSales),
-    }))
+  const { data, error } = await supabase.rpc('cpgist_dataset_analytics', { p_dataset_id: Number(datasetId) })
+  if (error) throw new Error(`Unable to calculate CPG analytics: ${error.message}`)
+  return normaliseRpcAnalytics(data as RpcAnalytics)
+}
 
+export async function queryMetrics(supabase: SupabaseClient, datasetId: string) {
+  return (await aggregateAnalytics(supabase, datasetId)).metrics
+}
+
+/** Selected-brand detail is bounded so drilldowns cannot accidentally pull the entire fact table. */
+export async function brandDetail(supabase: SupabaseClient, datasetId: string, brandId: string) {
+  const { data, error } = await supabase
+    .from('sales_facts')
+    .select('period,category,brand_id,retailer_id,product_id,sales,units,distribution,price,on_promo')
+    .eq('dataset_id', Number(datasetId))
+    .eq('brand_id', Number(brandId))
+    .order('period', { ascending: true })
+    .limit(100000)
+  if (error) throw error
+  const own = (data ?? []) as Fact[]
+  if (!own.length) return null
+  const total = await queryMetrics(supabase, datasetId)
+  const ownMetrics = metricsFromFacts(own)
   return {
-    metrics: metricsFromFacts(facts),
-    trend: trendFor(facts),
-    categories: summarize((fact) => fact.category),
-    brands: summarize((fact) => fact.brand_id, brands),
-    retailers: summarize((fact) => fact.retailer_id, retailers),
-    anomalies,
+    id: brandId,
+    name: brandId,
+    metrics: { ...ownMetrics, marketShare: total.sales > 0 ? calculateMarketShare(ownMetrics.sales, total.sales) : null },
+    trend: trendFor(own),
+    categories: aggregateBy(own, (f) => f.category).map(({ key, ...value }) => ({ name: key, ...value })),
+    anomalies: detectAnomaliesFromFacts(own),
   }
 }
 
 export async function brandComparison(supabase: SupabaseClient, datasetId: string, brandIds?: string[]) {
-  const facts = await fetchFacts(supabase, datasetId)
-  const brands = await fetchNames(supabase, 'brands', datasetId)
-  const selected = brandIds?.filter(Boolean) ?? []
-  const ids = selected.length ? selected : [...new Set(facts.map((f) => f.brand_id).filter(Boolean) as string[])].slice(0, 8)
-  const totalSales = facts.reduce((sum, f) => sum + (Number(f.sales) || 0), 0)
-  const rows = ids.map((id) => {
-    const own = facts.filter((f) => f.brand_id === id)
-    const metrics = metricsFromFacts(own)
-    const trend = trendFor(own)
-    const previous = trend.length > 1 ? trend[trend.length - 2].sales : null
-    const current = trend.length ? trend[trend.length - 1].sales : 0
-    return {
-      id,
-      name: brands.get(id) ?? id,
-      ...metrics,
-      marketShare: calculateMarketShare(metrics.sales, totalSales),
-      latestPeriod: trend.at(-1)?.period ?? null,
-      latestGrowth: previous === null ? null : calculateGrowth(current, previous),
-      trend,
-    }
-  })
-  return rows.sort((a, b) => b.sales - a.sales)
-}
-
-export async function brandDetail(supabase: SupabaseClient, datasetId: string, brandId: string) {
-  const facts = await fetchFacts(supabase, datasetId)
-  const brands = await fetchNames(supabase, 'brands', datasetId)
-  const own = facts.filter((f) => f.brand_id === brandId)
-  if (!own.length) return null
-  const totalSales = facts.reduce((sum, f) => sum + (Number(f.sales) || 0), 0)
-  const trend = trendFor(own)
-  const categories = aggregateBy(own, (f) => f.category).map(({ key, ...value }) => ({ name: key, ...value }))
-  return {
-    id: brandId,
-    name: brands.get(brandId) ?? brandId,
-    metrics: { ...metricsFromFacts(own), marketShare: calculateMarketShare(metricsFromFacts(own).sales, totalSales) },
-    trend,
-    categories,
-    anomalies: await detectAnomaliesFromFacts(own),
-  }
+  const analytics = await aggregateAnalytics(supabase, datasetId)
+  const selected = new Set((brandIds ?? []).filter(Boolean))
+  return (analytics.brands as Array<Record<string, unknown>>)
+    .filter((row) => !selected.size || selected.has(String(row.id)))
+    .slice(0, selected.size ? selected.size : 8)
 }
 
 export async function detectAnomalies(supabase: SupabaseClient, datasetId: string) {
-  return detectAnomaliesFromFacts(await fetchFacts(supabase, datasetId))
+  return (await aggregateAnalytics(supabase, datasetId)).anomalies
 }
 
 export function detectAnomaliesFromFacts(facts: Fact[]) {
   const values = facts.map((row) => Number(row.sales) || 0)
   if (values.length < 3) return []
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length
-  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length
-  const deviation = Math.sqrt(variance)
+  const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length)
   if (!deviation) return []
   return facts
     .filter((row) => row.period && Math.abs((Number(row.sales) || 0) - mean) > deviation * 2)
-    .map((row) => ({
-      period: row.period,
-      sales: Number(row.sales) || 0,
-      zScore: ((Number(row.sales) || 0) - mean) / deviation,
-    }))
+    .map((row) => ({ period: row.period, sales: Number(row.sales) || 0, zScore: ((Number(row.sales) || 0) - mean) / deviation }))
+    .slice(0, 20)
 }
 
 export { calculateGrowth }
