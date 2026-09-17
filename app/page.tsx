@@ -21,7 +21,7 @@ type Analytics = {
   selectedBrand?: any
   comparison?: any[]
 }
-type Nav = 'Overview' | 'AI Analyst' | 'Data Sources' | 'Datasets' | 'Validation' | 'Insights' | 'Reports' | 'Workflows' | 'Saved Analyses' | 'Settings'
+type Nav = 'Overview' | 'AI Analyst' | 'Data Sources' | 'Datasets' | 'Validation' | 'Insights' | 'Reports' | 'Workflows' | 'Saved Analyses' | 'Settings' | 'Help'
 
 const nav: { label: Nav; icon: any }[] = [
   { label: 'Overview', icon: LayoutDashboard }, { label: 'AI Analyst', icon: BrainCircuit },
@@ -113,8 +113,9 @@ export default function Home() {
 
   const selected = useMemo(() => analytics?.brands.filter(b => brandIds.includes(b.id)) ?? [], [analytics, brandIds])
 
-  const ask = async () => {
-    if (!analystPrompt.trim()) return
+  const ask = async (question = analystPrompt) => {
+    if (!question.trim()) return
+    setAnalystPrompt(question)
     setAnswer(null)
     try {
       const r = await fetch('/api/analyst', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: analystPrompt, datasetId }) })
@@ -147,20 +148,19 @@ export default function Home() {
       <button className="workspace-switcher" onClick={() => setActive('Settings')}><div className="workspace-avatar">C</div>{sidebarOpen && <><div className="workspace-copy"><span>Workspace</span><strong>CPGist AI</strong></div><ChevronDown className="small-icon" /></>}</button>
       <div className="nav-section-label">{sidebarOpen ? 'Workspace' : '•••'}</div>
       <nav className="primary-nav">{nav.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => setActive(label)}><Icon />{sidebarOpen && <span>{label}</span>}</button>)}</nav>
-      <div className="sidebar-bottom"><button className="nav-item" onClick={() => notify('Use the search box or ask AI Analyst for help.')}><CircleHelp />{sidebarOpen && <span>Help center</span>}</button><button className="nav-item" onClick={() => setActive('Settings')}><Settings2 />{sidebarOpen && <span>Settings</span>}</button><button className="user-card" onClick={async () => { await fetch('/api/auth/signout', { method: 'POST' }).catch(() => {}); window.location.assign('/login') }}><div className="user-avatar">{initials}</div>{sidebarOpen && <div><strong>{displayName}</strong><span>Sign out</span></div>}</button></div>
+      <div className="sidebar-bottom"><button className="nav-item" onClick={() => setActive('Help')}><CircleHelp />{sidebarOpen && <span>Help center</span>}</button><button className="nav-item" onClick={() => setActive('Settings')}><Settings2 />{sidebarOpen && <span>Settings</span>}</button><button className="user-card" onClick={async () => { await fetch('/api/auth/signout', { method: 'POST' }).catch(() => {}); window.location.assign('/login') }}><div className="user-avatar">{initials}</div>{sidebarOpen && <div><strong>{displayName}</strong><span>Sign out</span></div>}</button></div>
     </aside>
 
     <section className="cpg-main">
       <header className="topbar"><button className="icon-button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle navigation"><Menu /></button><button className="global-search" onClick={() => setCommandOpen(true)}><Search /><span>Search datasets, brands, reports...</span><kbd>⌘ K</kbd></button><div className="top-actions"><button className="icon-button" onClick={refresh} title="Refresh"><RefreshCw className={refreshing ? 'spin' : ''} /></button><span className="live-dot"><i /> Live data</span><button className="icon-button" onClick={() => setActive('Validation')}><Bell /></button><button className="top-avatar" onClick={() => setActive('Settings')}>{initials}</button></div></header>
 
       <div className="content-wrap page-enter">
-        {supabaseConfigMissing && <section className="panel config-panel" role="alert"><div><div className="eyebrow">DEPLOYMENT CONFIGURATION</div><h2>Connect Supabase to load your workspace</h2><p>This deployment needs <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> (or the legacy <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>) configured in its environment.</p></div></section>}
         <div className="page-heading"><div><div className="eyebrow">CPGIST AI / WORKSPACE</div><h1>{active}</h1><p>{active === 'Overview' ? 'Evidence-first consumer packaged goods intelligence.' : `Work with real data in ${active.toLowerCase()}.`}</p></div><div className="heading-actions">
           <select className="button secondary" value={datasetId} onChange={e => setDatasetId(e.target.value)} aria-label="Active dataset"><option value="">Select dataset</option>{datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
           <button className="button primary" onClick={() => active === 'Datasets' ? setUploadOpen(true) : setActive('Workflows')}><Plus /> {active === 'Datasets' ? 'Import dataset' : 'New workflow'}</button>
         </div></div>
 
-        {active === 'Overview' && <Overview analytics={analytics} datasets={datasets} onAI={() => setActive('AI Analyst')} onCompare={() => setActive('Insights')} />}
+        {active === 'Overview' && <Overview analytics={analytics} datasets={datasets} onAI={(question) => { if (question) setAnalystPrompt(question); setActive('AI Analyst') }} onCompare={() => setActive('Insights')} />}
         {active === 'AI Analyst' && <Analyst prompt={analystPrompt} setPrompt={setAnalystPrompt} answer={answer} ask={ask} />}
         {active === 'Data Sources' && <Sources notify={notify} />}
         {active === 'Datasets' && <DatasetView datasets={datasets} analytics={analytics} onUpload={() => setUploadOpen(true)} onRefresh={refresh} onSelect={setDatasetId} />}
@@ -170,6 +170,7 @@ export default function Home() {
         {active === 'Workflows' && <Workflows datasets={datasets} datasetId={datasetId} notify={notify} />}
         {active === 'Saved Analyses' && <Saved />}
         {active === 'Settings' && <Settings />}
+        {active === 'Help' && <Help />}
       </div>
     </section>
 
@@ -179,11 +180,11 @@ export default function Home() {
   </main>
 }
 
-function Overview({ analytics, datasets, onAI, onCompare }: { analytics: Analytics | null; datasets: Dataset[]; onAI: () => void; onCompare: () => void }) {
+function Overview({ analytics, datasets, onAI, onCompare }: { analytics: Analytics | null; datasets: Dataset[]; onAI: (question?: string) => void; onCompare: () => void }) {
   const trend = analytics?.trend ?? []
   return <div className="dashboard-grid">
     <div className="metric-row"><Metric icon={Database} label="Connected datasets" value={String(datasets.length)} delta={datasets.length ? `${datasets.filter(d => d.status === 'ready').length} ready` : 'Import a CSV'} /><Metric icon={BarChart3} label="Total sales" value={analytics ? money(analytics.metrics.sales) : '—'} delta={analytics ? `${analytics.metrics.rowCount.toLocaleString()} rows` : 'Select a dataset'} /><Metric icon={Target} label="Market coverage" value={analytics ? pct(analytics.metrics.averageDistribution) : '—'} delta={analytics ? 'Average distribution' : 'Calculated from data'} /></div>
-    <section className="panel analyst-card"><PanelHeading kicker="AI ANALYST" title="Ask your intelligence layer" action={<button className="text-button" onClick={onAI}>Open analyst <ArrowUpRight /></button>} /><p>Ask questions about the selected dataset. The model receives only server-computed evidence from your data.</p><div className="suggestion-row"><button onClick={onAI}>Which brands have the highest share?</button><button onClick={onAI}>Find sales anomalies</button><button onClick={onCompare}>Compare brands</button></div></section>
+    <section className="panel analyst-card"><PanelHeading kicker="AI ANALYST" title="Ask your intelligence layer" action={<button className="text-button" onClick={onAI}>Open analyst <ArrowUpRight /></button>} /><p>Ask questions about the selected dataset. The model receives only server-computed evidence from your data.</p><div className="suggestion-row"><button onClick={() => onAI('Which brands have the highest market share?')}>Which brands have the highest share?</button><button onClick={() => onAI('Find sales anomalies and explain the observed periods.')}>Find sales anomalies</button><button onClick={onCompare}>Compare brands</button></div></section>
     <section className="panel chart-panel"><PanelHeading kicker="SALES TREND" title="Real dataset trend" action={<span className="muted-copy">{trend.length} periods</span>} />{trend.length ? <LineChart points={trend.map(x => x.sales)} labels={trend.map(x => x.period)} /> : <Empty icon={Database} text="Select an ingested dataset to plot sales." />}</section>
     <section className="panel"><PanelHeading kicker="BRAND PERFORMANCE" title="Share by brand" action={<button className="text-button" onClick={onCompare}>Compare <GitCompare /></button>} />{analytics?.brands.length ? <Bars items={analytics.brands.slice(0, 8).map(x => ({ label: x.name, value: x.marketShare ?? 0 }))} /> : <Empty icon={BarChart3} text="Brand dimensions appear after brand data is ingested." />}</section>
     <section className="panel"><PanelHeading kicker="ANOMALIES" title="Observed outliers" />{analytics?.anomalies.length ? analytics.anomalies.slice(0,6).map((a,i)=><div className="activity-row" key={i}><div><strong>{a.period}</strong><span>Sales {money(a.sales)} · z-score {a.zScore.toFixed(2)}</span></div><em>Observed</em></div>) : <Empty icon={ShieldCheck} text="No statistical outliers detected in the selected dataset." />}</section>
@@ -208,6 +209,8 @@ function Analyst({prompt,setPrompt,answer,ask}:{prompt:string;setPrompt:(x:strin
     <div className="prompt-hints"><button onClick={()=>setPrompt('Which brands have the highest market share?')}>Brand share</button><button onClick={()=>setPrompt('Find sales anomalies and explain the observed periods.')}>Anomalies</button><button onClick={()=>setPrompt('Summarize the latest sales trend.')}>Trend summary</button></div>
   </div></section>
 }
+
+function Help() { return <div className="dashboard-grid"><section className="panel"><PanelHeading kicker="HELP CENTER" title="Get more from CPGist AI" /><p className="muted-copy">Choose a dataset, review the Overview metrics, or ask grounded questions in AI Analyst. Every answer is calculated from the selected dataset before any explanation is generated.</p></section><section className="panel"><PanelHeading kicker="QUICK START" title="Common workflows" /><div className="activity-row"><div><strong>Import data</strong><span>Open Datasets and select Import CSV to create a dataset.</span></div></div><div className="activity-row"><div><strong>Investigate performance</strong><span>Select a dataset, then compare brands or ask AI Analyst a question.</span></div></div><div className="activity-row"><div><strong>Need assistance?</strong><span>Check Settings for connection diagnostics and workspace preferences.</span></div></div></section></div> }
 
 function Sources({notify}:{notify:(x:string)=>void}) {
   return <div className="sources-grid"><SourceCard icon={GitBranch} name="GitHub Syndicate" type="Repository" detail="Repository credentials are kept server-side. Configure them in deployment settings." onClick={()=>notify('Configure the GitHub source credentials in your deployment environment.')} /><SourceCard icon={HardDrive} name="Google Drive" type="Cloud storage" detail="OAuth flow is implemented; add provider credentials and the callback URL." href="/api/connectors/google" /><SourceCard icon={Network} name="Microsoft Graph" type="Enterprise data" detail="OAuth flow is implemented; add provider credentials and the callback URL." href="/api/connectors/microsoft" /><SourceCard icon={Database} name="Internal analytics" type="Supabase" detail="Sales facts, dimensions, validation, and analysis results are stored in the connected workspace database." onClick={()=>notify('Internal Supabase analytics are available through Datasets and Overview.')} actionLabel="View datasets" /></div> }
