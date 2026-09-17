@@ -16,9 +16,6 @@ export async function GET() {
       ollama: {
         configured: Boolean(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_MODEL),
       },
-      agentReach: {
-        configured: Boolean(process.env.AGENT_REACH_BASE_URL && process.env.AGENT_REACH_API_KEY),
-      },
       connectorEncryption: {
         configured: Boolean(process.env.CONNECTOR_ENCRYPTION_KEY),
       },
