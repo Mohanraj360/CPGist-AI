@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Bulk-load the supplied CPG syndicate archive into CPGist.
 
-The importer validates every source file first, stages COPY input, and stamps
-all dataset-owned records with the selected dataset/org. It never generates
-business data and never falls back to demo data.
+Validates all seven source files, stages COPY input, stamps dataset/org ownership,
+and computes the app-compatible fact columns in SQL. No synthetic business data is generated.
 """
 from __future__ import annotations
 
@@ -94,8 +93,6 @@ def main() -> None:
                 )
                 dataset_id = cur.fetchone()[0]
 
-            # Dimensions are staged so the CSV's source IDs can be preserved while
-            # dataset/org ownership is added. This avoids direct COPY into owned tables.
             for table, filename, columns in [
                 ("brands", "brands.csv", ["id", "name", "category", "parent_company", "home_regions"]),
                 ("retailers", "retailers.csv", ["id", "name", "channel", "region", "total_stores"]),
@@ -107,28 +104,28 @@ def main() -> None:
                 cur.execute(f"CREATE TEMP TABLE {stage} AS SELECT * FROM {table} WITH NO DATA")
                 copy_csv(cur, root / filename, stage, columns)
                 if table == "brands":
-                    cur.execute("""INSERT INTO brands (id,dataset_id,name,category,parent_company,home_regions)
-                        SELECT id,%s,name,category,parent_company,home_regions FROM _cpgist_brands_stage
-                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,name=EXCLUDED.name,category=EXCLUDED.category,parent_company=EXCLUDED.parent_company,home_regions=EXCLUDED.home_regions""", (dataset_id,))
+                    cur.execute("""INSERT INTO brands (id,dataset_id,org_id,name,category,parent_company,home_regions)
+                        SELECT id,%s,%s,name,category,parent_company,home_regions FROM _cpgist_brands_stage
+                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,org_id=EXCLUDED.org_id,name=EXCLUDED.name,category=EXCLUDED.category,parent_company=EXCLUDED.parent_company,home_regions=EXCLUDED.home_regions""", (dataset_id, org_id))
                 elif table == "retailers":
-                    cur.execute("""INSERT INTO retailers (id,dataset_id,name,channel,region,total_stores)
-                        SELECT id,%s,name,channel,region,total_stores FROM _cpgist_retailers_stage
-                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,name=EXCLUDED.name,channel=EXCLUDED.channel,region=EXCLUDED.region,total_stores=EXCLUDED.total_stores""", (dataset_id,))
+                    cur.execute("""INSERT INTO retailers (id,dataset_id,org_id,name,channel,region,total_stores)
+                        SELECT id,%s,%s,name,channel,region,total_stores FROM _cpgist_retailers_stage
+                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,org_id=EXCLUDED.org_id,name=EXCLUDED.name,channel=EXCLUDED.channel,region=EXCLUDED.region,total_stores=EXCLUDED.total_stores""", (dataset_id, org_id))
                 else:
-                    cur.execute("""INSERT INTO products (id,dataset_id,brand_id,name,category,subcategory,size)
-                        SELECT id,%s,brand_id,name,category,subcategory,size FROM _cpgist_products_stage
-                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,brand_id=EXCLUDED.brand_id,name=EXCLUDED.name,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,size=EXCLUDED.size""", (dataset_id,))
+                    cur.execute("""INSERT INTO products (id,dataset_id,org_id,brand_id,name,category,subcategory,size)
+                        SELECT id,%s,%s,brand_id,name,category,subcategory,size FROM _cpgist_products_stage
+                        ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,org_id=EXCLUDED.org_id,brand_id=EXCLUDED.brand_id,name=EXCLUDED.name,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,size=EXCLUDED.size""", (dataset_id, org_id))
 
             cur.execute("CREATE TEMP TABLE _cpgist_sales_stage AS SELECT * FROM sales_facts WITH NO DATA")
             fact_cols = ["id", "product_id", "retailer_id", "week_ending", "dollar_sales", "units", "acv_distribution", "on_promo", "promo_type", "discount_depth_pct"]
             copy_csv(cur, root / "sales_facts.csv", "_cpgist_sales_stage", fact_cols)
             cur.execute("""INSERT INTO sales_facts
-                (id,dataset_id,product_id,retailer_id,week_ending,dollar_sales,units,acv_distribution,on_promo,promo_type,discount_depth_pct,brand_id,category,period,sales,distribution,price,row_hash)
-                SELECT s.id,%s,s.product_id,s.retailer_id,s.week_ending,s.dollar_sales,s.units,s.acv_distribution,s.on_promo,s.promo_type,s.discount_depth_pct,
+                (id,dataset_id,org_id,product_id,retailer_id,week_ending,dollar_sales,units,acv_distribution,on_promo,promo_type,discount_depth_pct,brand_id,category,period,sales,distribution,price,row_hash)
+                SELECT s.id,%s,%s,s.product_id,s.retailer_id,s.week_ending,s.dollar_sales,s.units,s.acv_distribution,s.on_promo,s.promo_type,s.discount_depth_pct,
                        p.brand_id,p.category,s.week_ending,s.dollar_sales,s.acv_distribution,CASE WHEN s.units > 0 THEN s.dollar_sales/s.units END,
                        md5(concat_ws('|',s.week_ending::text,s.product_id::text,s.retailer_id::text,s.dollar_sales::text,s.units::text))
                 FROM _cpgist_sales_stage s JOIN products p ON p.id=s.product_id AND p.dataset_id=%s
-                ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,product_id=EXCLUDED.product_id,retailer_id=EXCLUDED.retailer_id,week_ending=EXCLUDED.week_ending,dollar_sales=EXCLUDED.dollar_sales,units=EXCLUDED.units,acv_distribution=EXCLUDED.acv_distribution,on_promo=EXCLUDED.on_promo,promo_type=EXCLUDED.promo_type,discount_depth_pct=EXCLUDED.discount_depth_pct,brand_id=EXCLUDED.brand_id,category=EXCLUDED.category,period=EXCLUDED.period,sales=EXCLUDED.sales,distribution=EXCLUDED.distribution,price=EXCLUDED.price,row_hash=EXCLUDED.row_hash""", (dataset_id, dataset_id))
+                ON CONFLICT (id) DO UPDATE SET dataset_id=EXCLUDED.dataset_id,org_id=EXCLUDED.org_id,product_id=EXCLUDED.product_id,retailer_id=EXCLUDED.retailer_id,week_ending=EXCLUDED.week_ending,dollar_sales=EXCLUDED.dollar_sales,units=EXCLUDED.units,acv_distribution=EXCLUDED.acv_distribution,on_promo=EXCLUDED.on_promo,promo_type=EXCLUDED.promo_type,discount_depth_pct=EXCLUDED.discount_depth_pct,brand_id=EXCLUDED.brand_id,category=EXCLUDED.category,period=EXCLUDED.period,sales=EXCLUDED.sales,distribution=EXCLUDED.distribution,price=EXCLUDED.price,row_hash=EXCLUDED.row_hash""", (dataset_id, org_id, dataset_id))
 
             for table, filename, columns in [
                 ("brand_relationships", "brand_relationships.csv", ["id", "brand_id", "related_brand_id", "relationship_type", "category", "overlapping_regions", "org_id"]),
@@ -136,7 +133,6 @@ def main() -> None:
                 ("competitor_signals", "competitor_signals.csv", ["id", "brand_id", "category", "retailer_id", "region", "signal_date", "signal_type", "magnitude_pct", "description", "org_id"]),
             ]:
                 if table_exists(cur, table):
-                    # These source files already carry org_id; COPY preserves it exactly.
                     copy_csv(cur, root / filename, table, columns)
 
             cur.execute("UPDATE datasets SET status='ready',row_count=%s,source=%s,updated_at=now() WHERE id=%s", (counts["sales_facts.csv"], "user-supplied Syndicate data.zip", dataset_id))
