@@ -101,19 +101,36 @@ export async function aggregateAnalytics(supabase: SupabaseClient, datasetId: st
     detectAnomaliesFromFacts(facts),
   ])
   const totalSales = facts.reduce((sum, fact) => sum + (Number(fact.sales) || 0), 0)
-  const summarize = (select: (fact: Fact) => string | null | undefined, names?: Map<string, string>) =>
+  const categorySales = new Map<string, number>()
+  for (const fact of facts) {
+    if (!fact.category) continue
+    categorySales.set(fact.category, (categorySales.get(fact.category) ?? 0) + (Number(fact.sales) || 0))
+  }
+  const brandCategories = new Map<string, Set<string>>()
+  for (const fact of facts) {
+    if (!fact.brand_id || !fact.category) continue
+    const categories = brandCategories.get(fact.brand_id) ?? new Set<string>()
+    categories.add(fact.category)
+    brandCategories.set(fact.brand_id, categories)
+  }
+  const summarize = (select: (fact: Fact) => string | null | undefined, names?: Map<string, string>, denominator?: (key: string) => number | null) =>
     aggregateBy(facts, select).map(({ key, ...value }) => ({
       id: key,
       name: names?.get(key) ?? key,
       ...value,
-      marketShare: calculateMarketShare(value.sales, totalSales),
+      marketShare: calculateMarketShare(value.sales, denominator?.(key) ?? totalSales),
     }))
+  const brandDenominator = (brandId: string) => {
+    const categories = brandCategories.get(brandId)
+    if (!categories || categories.size !== 1) return null
+    return categorySales.get([...categories][0]) ?? null
+  }
 
   return {
     metrics: metricsFromFacts(facts),
     trend: trendFor(facts),
     categories: summarize((fact) => fact.category),
-    brands: summarize((fact) => fact.brand_id, brands),
+    brands: summarize((fact) => fact.brand_id, brands, brandDenominator),
     retailers: summarize((fact) => fact.retailer_id, retailers),
     anomalies,
   }
