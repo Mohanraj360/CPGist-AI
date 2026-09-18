@@ -27,9 +27,37 @@ export function calculatePromotionRate(records: SalesRecord[]) {
 }
 
 export function calculateAveragePrice(records: SalesRecord[]) {
-  const units = sumBy(records, (record) => record.units)
+  const valid = records.filter((record) => Number.isFinite(record.sales) && Number.isFinite(record.units) && record.units > 0)
+  const units = sumBy(valid, (record) => record.units)
   if (units <= 0) return null
-  return sumBy(records, (record) => record.sales) / units
+  return sumBy(valid, (record) => record.sales) / units
+}
+
+export function calculatePromoLift(records: SalesRecord[]) {
+  const promoted = records.filter((record) => record.onPromo === true)
+  const baseline = records.filter((record) => record.onPromo === false)
+  const promotedAverage = calculateAveragePrice(promoted)
+  const baselineAverage = calculateAveragePrice(baseline)
+  if (promotedAverage === null || baselineAverage === null || baselineAverage === 0) return null
+  return ((promotedAverage - baselineAverage) / Math.abs(baselineAverage)) * 100
+}
+
+export function calculatePriceChange(current: number | null, previous: number | null) {
+  if (current === null || previous === null || previous === 0) return null
+  return ((current - previous) / Math.abs(previous)) * 100
+}
+
+export function calculateIncrementalSales(records: SalesRecord[]) {
+  const promoted = records.filter((record) => record.onPromo === true)
+  const baseline = records.filter((record) => record.onPromo === false)
+  const baselineUnitsPerRecord = baseline.length ? sumBy(baseline, (record) => record.units) / baseline.length : null
+  if (baselineUnitsPerRecord === null || !promoted.length) return null
+  return sumBy(promoted, (record) => record.units) - baselineUnitsPerRecord * promoted.length
+}
+
+export function calculateContribution(entitySales: number, totalSales: number) {
+  if (!Number.isFinite(entitySales) || !Number.isFinite(totalSales) || totalSales <= 0) return null
+  return (entitySales / totalSales) * 100
 }
 
 export function generateTrend(records: SalesRecord[]) {
