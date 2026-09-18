@@ -158,7 +158,7 @@ The application now treats Supabase as the source of truth for dashboard data. T
 - Brand comparison supports selecting up to four observed brands.
 - Brand detail exposes sales, units, market share, period trend, category mix, and observed anomalies.
 - The AI Analyst automatically uses the latest ready dataset when no dataset is explicitly selected.
-- Ollama receives server-computed evidence only.
+- Groq receives server-computed evidence only.
 - Each AI response gets a **deterministic grounding confidence** based on evidence-term overlap and exact numeric-claim matches. This is deliberately not presented as model accuracy: true accuracy requires a labeled evaluation benchmark.
 - Saved analyses are persisted in `analyses`.
 
@@ -167,7 +167,7 @@ The application now treats Supabase as the source of truth for dashboard data. T
 - CSV import and ingestion
 - Dataset selection and real analytics
 - Brand comparison and brand detail
-- AI chat with Ollama
+- AI chat with Groq
 - Saved analyses
 - Report creation and CSV export
 - Workflow creation and execution against a selected dataset

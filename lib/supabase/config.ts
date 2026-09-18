@@ -1,4 +1,5 @@
-export const SUPABASE_CONFIG_ERROR = 'Supabase server configuration is missing.'
+export const SUPABASE_PUBLIC_CONFIG_ERROR = 'Supabase public configuration is missing.'
+export const SUPABASE_SERVER_CONFIG_ERROR = 'Supabase server configuration is missing.'
 
 function getUrl() { return process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? null }
 

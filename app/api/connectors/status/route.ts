@@ -16,17 +16,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}))
-  if (body?.provider === 'ollama') {
-    const baseUrl = process.env.OLLAMA_BASE_URL
-    if (!baseUrl || !process.env.OLLAMA_MODEL) return NextResponse.json({ ok: false, error: 'Ollama is not configured.' }, { status: 503 })
-    try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(5000), cache: 'no-store' })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) return NextResponse.json({ ok: false, error: `Ollama responded with ${response.status}.` }, { status: 502 })
-      const models = Array.isArray(data?.models) ? data.models.map((m: { name?: string }) => m.name).filter(Boolean) : []
-      const modelReady = models.includes(process.env.OLLAMA_MODEL)
-      return NextResponse.json({ ok: modelReady, model: process.env.OLLAMA_MODEL, models, error: modelReady ? undefined : `Model ${process.env.OLLAMA_MODEL} is not installed in Ollama.` }, { status: modelReady ? 200 : 503 })
-    } catch { return NextResponse.json({ ok: false, error: 'Ollama is unavailable.' }, { status: 503 }) }
+  if (body?.provider === 'groq') {
+    const configured = Boolean(process.env.GROQ_API_KEY?.trim())
+    return NextResponse.json({ ok: configured, provider: 'groq', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile', error: configured ? undefined : 'Groq is not configured.' }, { status: configured ? 200 : 503 })
   }
   return NextResponse.json({ error: 'Choose a supported connection test.' }, { status: 400 })
 }

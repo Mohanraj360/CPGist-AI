@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import JSZip from 'jszip'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createHash } from 'node:crypto'
 import { parseCsv, profileRows, rowHash } from '@/lib/cpg/csv'
@@ -78,13 +79,26 @@ export async function POST(request: Request) {
 
     const form = await request.formData()
     const file = form.get('file')
-    if (!(file instanceof File) || !file.name.toLowerCase().endsWith('.csv')) {
-      return NextResponse.json({ error: 'Upload a CSV file.' }, { status: 400 })
+    if (!(file instanceof File) || !file.name.toLowerCase().endsWith('.zip')) {
+      return NextResponse.json({ error: 'Upload a Syndicate ZIP package.' }, { status: 400 })
     }
 
-    const content = await file.text()
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const requiredFiles = ['sales_facts.csv', 'products.csv', 'brands.csv', 'retailers.csv', 'brand_relationships.csv', 'signal_notes.csv', 'competitor_signals.csv']
+    const entries = new Map<string, JSZip.JSZipObject>()
+    Object.values(zip.files).forEach((entry) => {
+      if (entry.dir) return
+      const name = entry.name.split('/').pop()?.toLowerCase()
+      if (name) entries.set(name, entry)
+    })
+    const missing = requiredFiles.filter((name) => !entries.has(name))
+    if (missing.length) return NextResponse.json({ error: 'Syndicate package is missing required files.', missing, detected: requiredFiles.filter((name) => entries.has(name)) }, { status: 422 })
+
+    const salesEntry = entries.get('sales_facts.csv')
+    if (!salesEntry) return NextResponse.json({ error: 'sales_facts.csv is required.' }, { status: 422 })
+    const content = await salesEntry.async('string')
     const rows = parseCsv(content)
-    if (!rows.length) return NextResponse.json({ error: 'The CSV contains no data rows.' }, { status: 422 })
+    if (!rows.length) return NextResponse.json({ error: 'sales_facts.csv contains no data rows.' }, { status: 422 })
 
     const columns = Object.keys(rows[0])
     const salesColumn = findColumn(columns, ['sales', 'revenue', 'value', 'net sales'])
