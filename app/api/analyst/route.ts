@@ -1,12 +1,38 @@
+import { generateText } from 'ai'
+import { createGroq } from '@ai-sdk/groq'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { aggregateAnalytics } from '@/lib/cpg/server-analytics'
 import { calculateGroundingScore } from '@/lib/cpg/grounding'
 
-type OllamaResponse = { response?: string }
-function getOllamaConfig() { const baseUrl = process.env.OLLAMA_BASE_URL?.replace(/\/$/, ''); const model = process.env.OLLAMA_MODEL; if (!baseUrl || !model) throw new Error('Ollama is not configured.') ; return { baseUrl, model } }
-async function generateWithOllama(prompt: string) { const { baseUrl, model } = getOllamaConfig(); const response = await fetch(`${baseUrl}/api/generate`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model,prompt,stream:false,format:'json',options:{temperature:.1}}), signal:AbortSignal.timeout(45000)}); if(!response.ok) throw new Error(`Ollama returned ${response.status}.`); const data=await response.json() as OllamaResponse; if(!data.response?.trim()) throw new Error('Ollama returned an empty response.'); return data.response.trim() }
-function parseModelResponse(raw:string){try{const parsed=JSON.parse(raw) as {answer?:unknown};if(typeof parsed.answer==='string'&&parsed.answer.trim())return parsed.answer.trim()}catch{}return raw.trim()}
+const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile'
+
+function getGroqConfig() {
+  const apiKey = process.env.GROQ_API_KEY?.trim()
+  const model = process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL
+  if (!apiKey) throw new Error('AI provider is not configured.')
+  return { provider: createGroq({ apiKey }), model }
+}
+
+async function generateWithGroq(prompt: string) {
+  const { provider, model } = getGroqConfig()
+  const result = await generateText({
+    model: provider(model),
+    prompt,
+    temperature: 0.1,
+    abortSignal: AbortSignal.timeout(45000),
+  })
+  if (!result.text.trim()) throw new Error('AI service temporarily unavailable.')
+  return { text: result.text.trim(), model }
+}
+
+function parseModelResponse(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as { answer?: unknown }
+    if (typeof parsed.answer === 'string' && parsed.answer.trim()) return parsed.answer.trim()
+  } catch {}
+  return raw.trim()
+}
 function classifyIntent(prompt:string){const value=prompt.toLowerCase();if(/anomal|outlier|spike|drop/.test(value))return 'anomalies';if(/promo|promotion|lift|incremental/.test(value))return 'promotion';if(/price|pricing|elastic/.test(value))return 'pricing';if(/retailer|distribution|store/.test(value))return 'retailers';if(/category|segment/.test(value))return 'categories';if(/brand|share|compet/.test(value))return 'brands';if(/trend|period|month|quarter|sales/.test(value))return 'trend';return 'overview'}
 function buildEvidence(intent:string,analytics:Awaited<ReturnType<typeof aggregateAnalytics>>){const base={metrics:analytics.metrics,periods:analytics.trend};if(intent==='brands')return {...base,brands:analytics.brands.slice(0,20)};if(intent==='categories')return {...base,categories:analytics.categories.slice(0,20)};if(intent==='retailers')return {...base,retailers:analytics.retailers.slice(0,20)};if(intent==='anomalies')return {...base,anomalies:analytics.anomalies.slice(0,20)};return {...base,categories:analytics.categories.slice(0,10),brands:analytics.brands.slice(0,20),retailers:analytics.retailers.slice(0,10),anomalies:analytics.anomalies.slice(0,20)}}
 
@@ -22,10 +48,18 @@ export async function POST(request: Request) {
     const analytics=await aggregateAnalytics(supabase,datasetId);if(!analytics.metrics.rowCount)return NextResponse.json({error:'The selected dataset contains no analyzable sales facts.'},{status:422})
     const intent=classifyIntent(prompt)
     const evidence=JSON.stringify({dataset:dataset.name,intent,...buildEvidence(intent,analytics)})
-    const raw=await generateWithOllama(`You are CPGist AI, an evidence-first consumer packaged goods analyst. The question intent is ${intent}. Use ONLY the supplied dataset evidence. Never invent values, brands, periods, sources, causal explanations, or unsupported calculations. If evidence cannot answer, say so. Return JSON only: {"answer":"concise answer grounded in evidence"}.\nDATASET EVIDENCE:${evidence}\nUSER QUESTION:${prompt}`)
-    const answer=parseModelResponse(raw);if(!answer)return NextResponse.json({error:'The Analyst returned no answer.'},{status:503});const accuracy=calculateGroundingScore(answer,evidence)
-    const result={answer,dataset:dataset.name,provider:'ollama',model:process.env.OLLAMA_MODEL??'unknown',grounding:accuracy,accuracy,trace:['Intent detected','Authorized dataset loaded','All dataset facts aggregated server-side','Evidence supplied to model','Dataset-verified answer accuracy calculated']}
+    const generated = await generateWithGroq(`You are CPGist AI, an evidence-first consumer packaged goods analyst. The question intent is ${intent}. Use ONLY the supplied dataset evidence. Never invent values, brands, periods, sources, causal explanations, or unsupported calculations. If evidence cannot answer, say so. Return JSON only: {"answer":"concise answer grounded in evidence"}.\nDATASET EVIDENCE:${evidence}\nUSER QUESTION:${prompt}`)
+    const answer=parseModelResponse(generated.text);if(!answer)return NextResponse.json({error:'Insufficient evidence to answer reliably.'},{status:422});const accuracy=calculateGroundingScore(answer,evidence)
+    const result={answer,dataset:dataset.name,provider:'groq',model:generated.model,grounding:accuracy,accuracy,trace:['Intent detected','Authorized dataset loaded','All dataset facts aggregated server-side','Evidence supplied to Groq','Dataset-verified answer accuracy calculated']}
     const {data:saved,error:saveError}=await supabase.from('analyses').insert({dataset_id:datasetId,prompt,result,created_by:user.id}).select('id').single();if(saveError)console.error('[analyst] save failed',saveError)
     return NextResponse.json({...result,datasetId,analysisId:saved?.id??null})
-  } catch(error){console.error('[analyst]',error);return NextResponse.json({error:error instanceof Error?error.message:'AI Analyst is unavailable.'},{status:503})}
+  } catch (error) {
+    console.error('[analyst]', error)
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'AI provider is not configured.') return NextResponse.json({ error: message }, { status: 503 })
+    if (message.includes('AI service temporarily unavailable') || message.includes('AI_APICallError')) {
+      return NextResponse.json({ error: 'AI service temporarily unavailable.' }, { status: 503 })
+    }
+    return NextResponse.json({ error: 'AI service temporarily unavailable.' }, { status: 503 })
+  }
 }

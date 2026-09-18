@@ -13,9 +13,10 @@ export async function GET() {
       databaseReachable = !error
     } catch {}
   }
+  const groqConfigured = Boolean(process.env.GROQ_API_KEY?.trim())
   return NextResponse.json({
     supabase: { configured: isSupabaseConfigured() },
-    ollama: { configured: Boolean(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_MODEL) },
+    ai: { provider: 'Groq', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile', status: groqConfigured ? 'Configured' : 'Unavailable' },
     database: { reachable: databaseReachable },
   })
 }
