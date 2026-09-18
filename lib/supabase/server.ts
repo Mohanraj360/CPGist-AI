@@ -1,10 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { getSupabasePublicConfig, SUPABASE_CONFIG_ERROR } from './config'
+import { getServerSupabaseConfig, SUPABASE_CONFIG_ERROR } from './config'
 
 export async function createClient() {
   const cookieStore = await cookies()
-  const config = getSupabasePublicConfig()
+  const config = getServerSupabaseConfig()
   if (!config) throw new Error(SUPABASE_CONFIG_ERROR)
   return createServerClient(config.url, config.key, {
     cookies: {
