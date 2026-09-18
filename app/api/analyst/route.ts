@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { aggregateAnalytics } from '@/lib/cpg/server-analytics'
 import { calculateGroundingScore } from '@/lib/cpg/grounding'
-import { DEMO_DATASET_ID, demoEvidence, getDemoAnalytics } from '@/lib/cpg/demo-data'
 
 type OllamaResponse = { response?: string }
 function getOllamaConfig() { const baseUrl = process.env.OLLAMA_BASE_URL?.replace(/\/$/, ''); const model = process.env.OLLAMA_MODEL; if (!baseUrl || !model) throw new Error('Ollama is not configured.') ; return { baseUrl, model } }
@@ -14,14 +13,6 @@ export async function POST(request: Request) {
     const body=await request.json(); const prompt=typeof body.prompt==='string'?body.prompt.trim():''
     if(!prompt||prompt.length>2000)return NextResponse.json({error:'Enter a question under 2,000 characters.'},{status:400})
     let datasetId=typeof body.datasetId==='string'?body.datasetId:null
-    if(datasetId===DEMO_DATASET_ID){
-      const evidence=JSON.stringify(demoEvidence()); const dataset=getDemoAnalytics().dataset
-      let answer:string
-      try { answer=parseModelResponse(await generateWithOllama(`You are CPGist AI, an evidence-first CPG analyst. Use ONLY this evidence. Never invent facts. Return JSON only: {"answer":"concise answer"}. DATASET: ${dataset.name}\nEVIDENCE:${evidence}\nQUESTION:${prompt}`)) }
-      catch { answer='The local AI model is not reachable. The dataset is loaded and ready; start Ollama with the configured model to generate an AI answer.' }
-      const accuracy=calculateGroundingScore(answer,evidence)
-      return NextResponse.json({answer,dataset:dataset.name,datasetId,provider:'ollama',model:process.env.OLLAMA_MODEL??'qwen3:8b',grounding:accuracy,accuracy,trace:['Intent detected','Built-in demo dataset loaded','Deterministic analytics calculated','Evidence supplied to model','Dataset evidence verification completed']})
-    }
     const supabase=await createClient(); const {data:{user}}=await supabase.auth.getUser(); if(!user)return NextResponse.json({error:'Sign in is required.'},{status:401})
     if(!datasetId){const {data,error}=await supabase.from('datasets').select('id').eq('status','ready').order('updated_at',{ascending:false}).limit(1).maybeSingle();if(error)throw new Error(`Unable to select a dataset: ${error.message}`);datasetId=data?.id??null}
     if(!datasetId)return NextResponse.json({error:'Select or ingest a dataset before asking the AI Analyst.'},{status:422})
