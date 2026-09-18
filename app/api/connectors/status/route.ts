@@ -8,7 +8,7 @@ export async function GET() {
       googleDrive: { configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), callbackConfigured: Boolean(process.env.GOOGLE_REDIRECT_URI) },
       microsoftGraph: { configured: Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET && process.env.MICROSOFT_TENANT_ID), callbackConfigured: Boolean(process.env.MICROSOFT_REDIRECT_URI) },
       github: { configured: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), callbackConfigured: Boolean(process.env.GITHUB_REDIRECT_URI) },
-      ollama: { configured: Boolean(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_MODEL) },
+      groq: { configured: Boolean(process.env.GROQ_API_KEY?.trim()), model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' },
       connectorEncryption: { configured: Boolean(process.env.CONNECTOR_ENCRYPTION_KEY) },
     },
   })
